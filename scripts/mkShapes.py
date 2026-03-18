@@ -259,13 +259,8 @@ int main() {{
             f.write(f"\trm -f {all_targets}\n")
 
 
-
     # _____________________________________________________________________________
-    def makeNominals(self, outputDir, variables, cuts, samples, nuisances):
-
-        print ("======================")
-        print ("==== makeNominals ====")
-        print ("======================")
+    def setValues(self, outputDir, variables, cuts, samples, nuisances):
 
         self._variables = variables
         self._samples   = samples
@@ -273,7 +268,15 @@ int main() {{
         self._nuisances = nuisances
         self._outputDir = outputDir
 
-        os.system ("mkdir " + outputDir + "/")
+
+    # _____________________________________________________________________________
+    def makeNominals(self):
+
+        print ("======================")
+        print ("==== makeNominals ====")
+        print ("======================")
+
+        os.system ("mkdir " + self._outputDir + "/")
 
         ROOT.TH1.SetDefaultSumw2(True)
 
@@ -298,7 +301,8 @@ int main() {{
             print ("length of list_root_files = ", len(list_root_files))
             os.system ("mkdir " + self._scripts_run_folder + "/" + sampleName + "/" + subname + "/")
             for i, root_file in enumerate(list_root_files):
-              name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + str(i)
+              # name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + str(i)
+              name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               tree = "Events"
 
               output_root_file_name = "root_file_" + sampleName + "_" + subname + "_" + str(i) + ".root"
@@ -311,8 +315,10 @@ int main() {{
 
         # Run the compilation in parallel
         print("Start parallel compilation...")
-        subprocess.run(["make", "-j8"])
-
+        # subprocess.run(["make", "-j8"])
+        #
+        # subprocess.run() is a blocking call -> it will make the compilation to end before the next step
+        #
 
         # Now you can run it:
         # subprocess.run([f"./{name_code}"])
@@ -339,18 +345,23 @@ int main() {{
           for subname, list_root_files in sample['name'].items():
             os.system ("mkdir " + self._script_batch_location + "/" + sampleName + "/" + subname + "/")
             for i, root_file in enumerate(list_root_files):
-              name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + str(i)
+              name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
+              name_code_no_folder = "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               name_bash = self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sh"
               output_root_file_name = "root_file_" + sampleName + "_" + subname + "_" + str(i) + ".root"
 
-              bash_code = f"""
-#!/bin/bash
+              bash_code = f"""#!/bin/bash
 set -e  # Exit on error
 echo "Job started at $(date)"
 echo "Running on node $(hostname)"
 mkdir {self._outputDir}
-./{name_code}
+./{name_code_no_folder}
 cp {self._outputDir}/{output_root_file_name}  {submission_dir}/{self._outputDir}/
+
+echo "Current directory content after running:"
+ls -lh
+echo "Current full path: $(pwd)"
+
 """
 
               with open(f"{name_bash}", "w") as f:
@@ -358,13 +369,21 @@ cp {self._outputDir}/{output_root_file_name}  {submission_dir}/{self._outputDir}
                 os.system ("chmod +x " + name_bash)
                 # print ("name_bash = ", name_bash)
 
-              name_submit = self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sub"
+              name_submit = submission_dir + "/" + self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sub"
+              # name_folder = submission_dir + "/" + self._script_batch_location + "/" + sampleName + "/" + subname + "/"
+              name_folder = self._script_batch_location + "/" + sampleName + "/" + subname + "/"
+              name_folder_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/"
+              name_bash_no_folder = "my_script_" + str(i) + ".sh"
 
               submit_code = f"""
+initialdir            = {name_folder}
 executable            = {name_bash}
-output                = log/{name_bash}.out
-error                 = log/{name_bash}.err
-log                   = log/{name_bash}.log
+transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder}
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+output                = log/{name_bash_no_folder}.out
+error                 = log/{name_bash_no_folder}.err
+log                   = log/{name_bash_no_folder}.log
 getenv                = True
 +JobFlavour           = "longlunch"
 queue
@@ -374,7 +393,7 @@ queue
                 f.write(submit_code)
 
               print("Submitting job to HTCondor: condor_submit " + name_submit)
-              # subprocess.run(["condor_submit", f"{name_submit}"])
+              subprocess.run(["condor_submit", f"{name_submit}"])
 
 #
 #
@@ -401,7 +420,8 @@ if __name__ == '__main__':
 
     parser = defaultParser()
 
-    parser.add_argument("--submitBatch", action='store_true', dest="submitBatch", help="Trigger the submission to lxbatch")
+    parser.add_argument("--submitBatch", action='store_true', dest="submitBatch",   help="Trigger the submission to lxbatch")
+    parser.add_argument("--hadd",        action='store_true', dest="haddRootFiles", help="Trigger the merging of the root files")
 
     opt = parser.parse_args()
     print ("opt.pycfg            = ", opt.pycfg)
@@ -493,16 +513,26 @@ if __name__ == '__main__':
 
 
     factory = ShapeFactory()
+    factory.setValues( opt.outputDir, variables, cuts, samples, nuisances )
+
     # factory._treeName  = opt.treeName
     # factory._energy    = opt.energy
     # factory._lumi      = opt.lumi
     # factory._tag       = opt.tag
-    factory.makeNominals( opt.outputDir, variables, cuts, samples, nuisances )
+
+    if not opt.submitBatch and not opt.haddRootFiles:
+      factory.makeNominals()
 
     if opt.submitBatch :
       factory.submitBatch()
 
 
+    if opt.haddRootFiles :
+      print ("Hadd the different root files ...")
+
+# hadd -j 8 -O -f target.root source1.root source2.root ...
+
+      print ("I have hadded all the root files but I have not removed the original ones")
 
 
 
