@@ -86,6 +86,10 @@ class ShapeFactory:
 
         self._scripts_run_folder = "scripts_run"
 
+        # conditions
+        self._silentMode = False
+
+
     # _____________________________________________________________________________
     def __del__(self):
         pass
@@ -95,8 +99,107 @@ class ShapeFactory:
     def create_cpp_source_single_file(self, output_name, tree_name, file_path, output_root_file_name, sampleName):
         # This is your C++ template as a Python string
 
-        booking_logic = ""
+        define_input_files_logic = ""
 
+        define_input_files_logic += f"//  Nominal input files\n"
+
+        define_input_files_logic += f'    auto* nominal = new TChain("{tree_name}");\n'
+        define_input_files_logic += f'    nominal->Add("{file_path}");\n'
+
+        #
+        # now define the nuisances based on alternative trees
+        #
+        # 'kind': 'suffix',
+        # 'type': 'shape',
+        #
+        # 'mapUp': 'ElepTup',
+        # 'mapDown': 'ElepTdo',
+        #
+        #      'folderUp'    :   '/eos/cms/store/group/phys_higgs/cmshww/amassiro/HWWNano/Summer20UL18_106x_nAODv9_Full2018v9/MCl1loose2018v9__MCCorr2018v9NoJERInHorn__l2tightOR2018v9__ElepTup_suffix'
+        #      'folderDown'   : ...
+        #
+        #
+
+        #
+        # extract name of root file nominal, without folder path
+        #
+
+        # Find the index of the first "/" from the right
+        index = file_path.rfind("/")
+        # Extract everything from that index + 1 to the end
+        # (We add 1 so we don't include the "/" itself)
+        file_path_only_file_no_folder = file_path[index + 1:]
+
+        define_input_files_logic += f"//  Variations input files (if any)\n"
+
+        for nuisanceName, nuisance in self._nuisances.items():
+
+          if nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
+
+            define_input_files_logic += f'''    auto* friend_{nuisance['mapUp']} = new TChain("{tree_name}");\n'''
+            define_input_files_logic += f'''    friend_{nuisance['mapUp']}->Add("{nuisance['folderUp']}/{file_path_only_file_no_folder}");\n'''
+            define_input_files_logic += f'''    auto varBranches_{nuisance['mapUp']} = getBranchNames(friend_{nuisance['mapUp']});\n'''
+
+            define_input_files_logic += f'''    auto* friend_{nuisance['mapDown']} = new TChain("{tree_name}");\n'''
+            define_input_files_logic += f'''    friend_{nuisance['mapDown']}->Add("{nuisance['folderDown']}/{file_path_only_file_no_folder}");\n'''
+            define_input_files_logic += f'''    auto varBranches_{nuisance['mapDown']} = getBranchNames(friend_{nuisance['mapDown']});\n'''
+
+            define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapUp']}, "{nuisance['mapUp']}");\n'''
+            define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapDown']}, "{nuisance['mapDown']}");\n'''
+
+
+        define_input_files_logic += f'    ROOT::RDataFrame base_df(*nominal);\n'
+        define_input_files_logic += f'    ROOT::RDF::RInterface varied_df = base_df;\n'
+
+
+        #
+        # register the variations
+        #
+
+        register_variations_logic = ""
+
+        register_variations_logic += f"//  Register the variations\n"
+
+        if len(self._nuisances) != 0 :
+          register_variations_logic += f'    int suffix_size = 0;\n'
+
+          for nuisanceName, nuisance in self._nuisances.items():
+
+            if nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
+
+              register_variations_logic += f'''    suffix_size = {len(nuisance['mapUp']) + 1};\n'''
+              register_variations_logic += f'''    for (const auto& branch : varBranches_{nuisance['mapUp']}) {{\n'''
+              # register_variations_logic += f'''      if (branch.ends_with("{nuisance['mapUp']}")) {{\n'''
+              register_variations_logic += f'''      if (int(branch.size()) >= (suffix_size-1) && branch.compare(branch.size() - (suffix_size-1), (suffix_size-1), "{nuisance['mapUp']}") == 0 ) {{\n'''
+              register_variations_logic += f'''        std::string nomCol = branch.substr(0, branch.size() - suffix_size);\n'''
+              register_variations_logic += f'''        std::string expression = "ROOT::RVec<" + varied_df.GetColumnType(nomCol) + ">{{" + branch + "}}";\n'''
+              register_variations_logic += f'''        varied_df = varied_df.Vary(\n'''
+              register_variations_logic += f'''                                  nomCol,\n'''
+              register_variations_logic += f'''                                  expression,\n'''
+              register_variations_logic += f'''                                  {{"up"}},\n'''
+              register_variations_logic += f'''                                  "{nuisance['mapUp']}"\n'''
+              register_variations_logic += f'''                                  );\n'''
+              register_variations_logic += f'''      }};\n'''
+              register_variations_logic += f'''    }};\n'''
+
+              register_variations_logic += f'''    \n'''
+              register_variations_logic += f'''    suffix_size = {len(nuisance['mapDown']) + 1};\n'''
+              register_variations_logic += f'''    for (const auto& branch : varBranches_{nuisance['mapDown']}) {{\n'''
+              # register_variations_logic += f'''      if (branch.ends_with("{nuisance['mapDown']}")) {{\n'''
+              register_variations_logic += f'''      if (int(branch.size()) >= (suffix_size-1) && branch.compare(branch.size() - (suffix_size-1), (suffix_size-1), "{nuisance['mapDown']}") == 0 ) {{\n'''
+              register_variations_logic += f'''        std::string nomCol = branch.substr(0, branch.size() - suffix_size);\n'''
+              register_variations_logic += f'''        std::string expression = "ROOT::RVec<" + varied_df.GetColumnType(nomCol) + ">{{" + branch + "}}";\n'''
+              register_variations_logic += f'''        varied_df = varied_df.Vary(\n'''
+              register_variations_logic += f'''                                  nomCol,\n'''
+              register_variations_logic += f'''                                  expression,\n'''
+              register_variations_logic += f'''                                  {{"do"}},\n'''
+              register_variations_logic += f'''                                  "{nuisance['mapDown']}"\n'''
+              register_variations_logic += f'''                                  );\n'''
+              register_variations_logic += f'''      }};\n'''
+              register_variations_logic += f'''    }};\n'''
+
+
+        booking_logic = ""
 
         #
         # In RDataFrame, all variables must be defined before being plotted
@@ -106,20 +209,17 @@ class ShapeFactory:
         # In case of already defined variables, for example "mll", and "mll" is already defined in the TTree,
         # the code "SafeDefine" should handle this, and "Define" a variable only when needed
         #
-        # booking_logic += f'auto df = base_df'
-        # for variableName, variable in self._variables.items():
-        #     name = variable['name']
-        #     booking_logic += f'        .Define("{variableName}", "{name}")\n'
-        # booking_logic += f'        ;\n'
 
-        booking_logic += f"//  I need to define the RNode, otherwise SafeDefine will not work\n"
-        booking_logic += f'    auto current_node = ROOT::RDF::RNode(base_df);\n'
+        booking_logic += f"//  Initial ...\n"
+        booking_logic += f'    auto current_node = ROOT::RDF::RNode(varied_df);\n'
 
-        booking_logic += f"    // Define variables \n"
+
+        define_variables_logic = ""
+        define_variables_logic += f"//  I need to define the RNode, otherwise SafeDefine will not work\n"
+        define_variables_logic += f"    // Define variables \n"
         for variableName, variable in self._variables.items():
             name = variable['name']
-            booking_logic += f'    current_node = SafeDefine(current_node, "{variableName}", "{name}");\n'
-
+            define_variables_logic += f'    current_node = SafeDefine(current_node, "{variableName}", "{name}");\n'
 
         #
         # once all variables are defined, they can be used and plotted with "variableName"
@@ -127,32 +227,36 @@ class ShapeFactory:
         # In root file:    <cut>/<variable>/histo_<sample>
         #
         for cutName, cut in self._cuts.items():
-          booking_logic += f'    auto node_{cutName} = current_node.Filter("{cut}", "{cutName}");\n'
+          define_variables_logic += f'    auto node_{cutName} = current_node.Filter("{cut}", "{cutName}");\n'
 
           for variableName, variable in self._variables.items():
               (bins, v_min, v_max) = variable['range']
               # FIXME: folding needed
 
               # We add each RResultPtr to a vector called 'histograms'
-              booking_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}"));\n'
+              define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}"));\n'
 
-
-
-
-        booking_logic += f'    std::vector<std::string> list_of_variables;\n'
+        define_variables_logic += f'    \n'
+        define_variables_logic += f'    std::vector<std::string> list_of_variables;\n'
         for variableName, variable in self._variables.items():
-          booking_logic += f'    list_of_variables.push_back("{variableName}");\n'
+          define_variables_logic += f'    list_of_variables.push_back("{variableName}");\n'
 
 
 
         cpp_code = f"""
 #include "ROOT/RDataFrame.hxx"
+#include "ROOT/RDFHelpers.hxx"
+
 #include "TFile.h"
 #include "TH1D.h"
 #include "TDirectory.h"
+#include "TChain.h"
 #include <map>
 #include <vector>
 #include <iostream>
+#include <string>
+#include <typeinfo>
+
 
 
 ROOT::RDF::RNode SafeDefine(ROOT::RDF::RNode df, std::string name, std::string expr) {{
@@ -164,20 +268,46 @@ ROOT::RDF::RNode SafeDefine(ROOT::RDF::RNode df, std::string name, std::string e
 }}
 
 
+std::vector<std::string> getBranchNames(TTree* tree) {{
+  std::vector<std::string> names;
+  TObjArray* branches = tree->GetListOfBranches();
+  for (int i = 0; i < branches->GetEntries(); ++i)
+    names.push_back(branches->At(i)->GetName());
+  return names;
+}}
+
+
+
 int main() {{
     ROOT::EnableImplicitMT();
-    ROOT::RDataFrame base_df("{tree_name}", "{file_path}");
 
-    // auto count = base_df.Count();
-    // std::cout << "Successfully processed {tree_name}. Event count: " << *count << std::endl;
+    // --- Automatically generated input root files ---
+
+    {define_input_files_logic}
+
+    // ----------------------------------------
 
     std::map<std::string, std::vector<ROOT::RDF::RResultPtr<TH1D>>> hist_map;
+
+
+    // --- Automatically generated register nuisances variations ---
+
+    {register_variations_logic}
+
+    // ----------------------------------------
 
     // --- Automatically generated bookings ---
 
     {booking_logic}
 
     // ----------------------------------------
+
+    // --- Automatically generated define cuts and histograms ---
+
+    {define_variables_logic}
+
+    // ----------------------------------------
+#
 
     //
     // In root file:    <cut>/<variable>/histo_<sample>
@@ -193,8 +323,27 @@ int main() {{
             TDirectory *subdir = out_file.mkdir( (cut_label+"/"+list_of_variables.at(ivar)).c_str() );
             subdir->cd();
             ivar++;
-            h->SetName("histo_{sampleName}");
-            h->Write();
+
+            // get the nominal and the variations too
+            auto all_histos = ROOT::RDF::Experimental::VariationsFor(h);
+
+            for (auto& [name, histo] : all_histos) {{
+              std::string temp_name;
+              if (name == "nominal") {{
+                  temp_name = "histo_{sampleName}";
+              }}
+              else {{
+                temp_name = name.c_str();
+                size_t pos = temp_name.find(':');
+                if (pos != std::string::npos) {{
+                  temp_name = temp_name.substr(0, pos);
+                }}
+                temp_name = ("histo_{sampleName}_" + temp_name);
+              }}
+              gDirectory = subdir;
+              histo->SetName(temp_name.c_str());
+              histo->Write();
+            }}
         }}
         out_file.cd(); // Go back to root for the next directory
     }}
@@ -241,7 +390,8 @@ int main() {{
         with open(makefile_name, "w") as f:
             f.write("# Generated Makefile\n")
             f.write("CXX = g++\n")
-            f.write(f"CXXFLAGS = {type_of_compilation} -Wall {cpp_flags}\n")
+            # f.write(f"CXXFLAGS = {type_of_compilation} -Wall {cpp_flags} -std=c++20 -Wcpp \n")  # c++20 used for "ends_with"
+            f.write(f"CXXFLAGS = {type_of_compilation} -Wall {cpp_flags} \n")
             f.write(f"LDFLAGS = {ld_flags}\n\n")
 
             # 'all' target: the list of all executables to be created
@@ -267,6 +417,12 @@ int main() {{
         self._cuts      = cuts
         self._nuisances = nuisances
         self._outputDir = outputDir
+
+
+    # _____________________________________________________________________________
+    def setConditions(self, silentMode):
+
+        self._silentMode = silentMode
 
 
     # _____________________________________________________________________________
@@ -305,7 +461,7 @@ int main() {{
               name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               tree = "Events"
 
-              output_root_file_name = "root_file_" + sampleName + "_" + subname + "_" + str(i) + ".root"
+              output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
               self.create_cpp_source_single_file(name_code, tree, root_file, output_root_file_name, sampleName)
 
               list_of_files_to_compile.append(name_code)
@@ -315,7 +471,7 @@ int main() {{
 
         # Run the compilation in parallel
         print("Start parallel compilation...")
-        # subprocess.run(["make", "-j8"])
+        subprocess.run(["make", "-j8"])
         #
         # subprocess.run() is a blocking call -> it will make the compilation to end before the next step
         #
@@ -348,7 +504,7 @@ int main() {{
               name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               name_code_no_folder = "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               name_bash = self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sh"
-              output_root_file_name = "root_file_" + sampleName + "_" + subname + "_" + str(i) + ".root"
+              output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
 
               bash_code = f"""#!/bin/bash
 set -e  # Exit on error
@@ -375,15 +531,25 @@ echo "Current full path: $(pwd)"
               name_folder_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/"
               name_bash_no_folder = "my_script_" + str(i) + ".sh"
 
+              if self._silentMode :
+                output_file = "/dev/null"
+                error_file  = "/dev/null"
+                log_file    = "/dev/null"
+              else :
+                output_file = f"log/{name_bash_no_folder}.out"
+                error_file  = f"log/{name_bash_no_folder}.err"
+                log_file    = f"log/{name_bash_no_folder}.log"
+
+
               submit_code = f"""
 initialdir            = {name_folder}
 executable            = {name_bash}
 transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder}
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
-output                = log/{name_bash_no_folder}.out
-error                 = log/{name_bash_no_folder}.err
-log                   = log/{name_bash_no_folder}.log
+output                = {output_file}
+error                 = {error_file}
+log                   = {log_file}
 getenv                = True
 +JobFlavour           = "longlunch"
 queue
@@ -422,6 +588,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--submitBatch", action='store_true', dest="submitBatch",   help="Trigger the submission to lxbatch")
     parser.add_argument("--hadd",        action='store_true', dest="haddRootFiles", help="Trigger the merging of the root files")
+    parser.add_argument("--silentMode",  action='store_true', dest="silentMode",    help="Remove as much as possible the print and the log/err files production")
 
     opt = parser.parse_args()
     print ("opt.pycfg            = ", opt.pycfg)
@@ -438,6 +605,10 @@ if __name__ == '__main__':
     print ("opt.outputDir        = ", opt.outputDir)
 
     print ("opt.submitBatch      = ", opt.submitBatch)
+    print ("opt.hadd             = ", opt.haddRootFiles)
+    print ("opt.silentMode       = ", opt.silentMode)
+
+
 
 
     # not used by mkShapes
@@ -514,6 +685,7 @@ if __name__ == '__main__':
 
     factory = ShapeFactory()
     factory.setValues( opt.outputDir, variables, cuts, samples, nuisances )
+    factory.setConditions (opt.silentMode)
 
     # factory._treeName  = opt.treeName
     # factory._energy    = opt.energy
@@ -526,11 +698,13 @@ if __name__ == '__main__':
     if opt.submitBatch :
       factory.submitBatch()
 
-
     if opt.haddRootFiles :
       print ("Hadd the different root files ...")
 
-# hadd -j 8 -O -f target.root source1.root source2.root ...
+      hadd_cmd = f"hadd -j 8 -f {opt.outputDir}/root_file_joined.root    {opt.outputDir}/root_file___*.root"
+
+      print(f"hadd: {hadd_cmd}")
+      result = os.system(hadd_cmd)
 
       print ("I have hadded all the root files but I have not removed the original ones")
 
