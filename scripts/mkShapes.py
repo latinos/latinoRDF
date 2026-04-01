@@ -66,7 +66,7 @@ class ShapeFactory:
     # _____________________________________________________________________________
     def __init__(self):
 
-        variables = {}
+        variables = {}   # FIXME needed?
         self._variables = variables
 
         cuts = {}
@@ -75,6 +75,10 @@ class ShapeFactory:
         samples = {}
         self._samples = samples
 
+        aliases = {}
+        self._aliases = aliases
+
+        self._lumi = 1
 
         self._treeName = 'latino'
 
@@ -90,13 +94,14 @@ class ShapeFactory:
         self._silentMode = False
 
 
+
     # _____________________________________________________________________________
     def __del__(self):
         pass
 
 
     # _____________________________________________________________________________
-    def create_cpp_source_single_file(self, output_name, tree_name, file_path, output_root_file_name, sampleName):
+    def create_cpp_source_single_file(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight, aliases_to_be_defined):
         # This is your C++ template as a Python string
 
         define_input_files_logic = ""
@@ -134,7 +139,7 @@ class ShapeFactory:
 
         for nuisanceName, nuisance in self._nuisances.items():
 
-          if nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
+          if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
 
             define_input_files_logic += f'''    auto* friend_{nuisance['mapUp']} = new TChain("{tree_name}");\n'''
             define_input_files_logic += f'''    friend_{nuisance['mapUp']}->Add("{nuisance['folderUp']}/{file_path_only_file_no_folder}");\n'''
@@ -149,7 +154,26 @@ class ShapeFactory:
 
 
         define_input_files_logic += f'    ROOT::RDataFrame base_df(*nominal);\n'
-        define_input_files_logic += f'    ROOT::RDF::RInterface varied_df = base_df;\n'
+        # define_input_files_logic += f'    ROOT::RDF::RInterface varied_df = base_df;\n'
+        define_input_files_logic += f'    auto varied_df = ROOT::RDF::RNode(base_df);\n'
+
+
+        #
+        # define the weights needed for this specific sample
+        #
+        define_weights = ""
+        define_weights += f"//  weigths needed\n"
+        define_weights += f'    varied_df = SafeDefine(varied_df, "my_sample_weight", "{weight}");\n'
+
+        #
+        # define the aliases needed for this specific sample
+        #
+        define_aliases = ""
+        define_aliases += f"//  aliases/define needed\n"
+
+        for aliasName, alias in aliases_to_be_defined.items():
+          define_aliases += f'    varied_df = SafeDefine(varied_df, "{aliasName}", "{alias}");\n'
+
 
 
         #
@@ -161,11 +185,28 @@ class ShapeFactory:
         register_variations_logic += f"//  Register the variations\n"
 
         if len(self._nuisances) != 0 :
-          register_variations_logic += f'    int suffix_size = 0;\n'
-
+          first_time_suffix = 0
           for nuisanceName, nuisance in self._nuisances.items():
 
-            if nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
+            #
+            # "shape" : "suffix" nuisances
+            #  a.k.a. alternative friend trees
+            #  also the use of a different weight is possible, to be activated with "weigthsPerSample"    FIXME  Not yet implemented ... was this ever used?
+            #
+            #  e.g.
+            #    'mapUp': 'ElepTup',
+            #    'mapDown': 'ElepTdo',
+            #    'samples': dict((skey, ['1', '1']) for skey in mcALL),
+            #    'folderUp': makeMCDirectory('ElepTup_suffix'),
+            #    'folderDown': makeMCDirectory('ElepTdo_suffix'),
+            #    'weigthsPerSample': true
+            #
+            #
+            if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
+
+              if first_time_suffix == 0 :
+                register_variations_logic += f'    int suffix_size = 0;\n'
+                first_time_suffix = 1
 
               register_variations_logic += f'''    suffix_size = {len(nuisance['mapUp']) + 1};\n'''
               register_variations_logic += f'''    for (const auto& branch : varBranches_{nuisance['mapUp']}) {{\n'''
@@ -198,7 +239,41 @@ class ShapeFactory:
               register_variations_logic += f'''      }};\n'''
               register_variations_logic += f'''    }};\n'''
 
+            #
+            # "shape" : "weight" nuisances
+            #  a.k.a. same tree but with a different weight
+            #
+            #  e.g. nominal,         up,             down
+            #    ['SFweightMu','SFweightMuUp', 'SFweightMuDown']
+            #
+            #
+            if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'weight'):
 
+              #
+              # check if '{nuisance['samples'][sampleName][0]}' is in the string 'weight' (that is actually defined in 'my_sample_weight')
+              # if yes, propagate the weight variation
+
+              if nuisance['samples'][sampleName][0] in weight:
+
+                variation_up   =  weight.replace(nuisance['samples'][sampleName][0], nuisance['samples'][sampleName][1])
+                variation_down =  weight.replace(nuisance['samples'][sampleName][0], nuisance['samples'][sampleName][2])
+
+                register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
+                register_variations_logic += f'''      "my_sample_weight",\n'''
+                register_variations_logic += f'''      "ROOT::RVecD{{{variation_up},{variation_down}}}",\n'''
+                register_variations_logic += f'''      {{"up", "down"}}\n'''
+                register_variations_logic += f'''      );\n'''
+
+
+
+              # register_variations_logic += f'''    std::string expression_{nuisanceName} = "ROOT::RVecD{{{nuisance['samples'][sampleName][1]},{nuisance['samples'][sampleName][2]}}}";\n'''
+              # register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
+              # register_variations_logic += f'''                              "{nuisance['samples'][sampleName][0]}",\n'''
+              # register_variations_logic += f'''                              expression_{nuisanceName},\n'''
+              # register_variations_logic += f'''                              {{"up", "down"}}\n'''
+              # register_variations_logic += f'''                              );\n'''
+              #
+              #
         booking_logic = ""
 
         #
@@ -234,12 +309,16 @@ class ShapeFactory:
               # FIXME: folding needed
 
               # We add each RResultPtr to a vector called 'histograms'
-              define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}"));\n'
+              # define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}"));\n'
+              define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "my_sample_weight"));\n'
+              # define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "{weight}"));\n'
+
 
         define_variables_logic += f'    \n'
         define_variables_logic += f'    std::vector<std::string> list_of_variables;\n'
         for variableName, variable in self._variables.items():
           define_variables_logic += f'    list_of_variables.push_back("{variableName}");\n'
+
 
 
 
@@ -289,6 +368,18 @@ int main() {{
 
     std::map<std::string, std::vector<ROOT::RDF::RResultPtr<TH1D>>> hist_map;
 
+    // --- Automatically generated define aliases ---
+
+    {define_aliases}
+
+    // ----------------------------------------
+
+    // --- Automatically generated define weights ---
+
+    {define_weights}
+
+    // ----------------------------------------
+
 
     // --- Automatically generated register nuisances variations ---
 
@@ -296,10 +387,12 @@ int main() {{
 
     // ----------------------------------------
 
-    // --- Automatically generated bookings ---
+    // --- Automatically generated ... just the main node ---
 
     {booking_logic}
 
+    //
+    // from now on: current_node
     // ----------------------------------------
 
     // --- Automatically generated define cuts and histograms ---
@@ -307,7 +400,7 @@ int main() {{
     {define_variables_logic}
 
     // ----------------------------------------
-#
+
 
     //
     // In root file:    <cut>/<variable>/histo_<sample>
@@ -410,14 +503,15 @@ int main() {{
 
 
     # _____________________________________________________________________________
-    def setValues(self, outputDir, variables, cuts, samples, nuisances):
+    def setValues(self, outputDir, variables, cuts, samples, nuisances, aliases, lumi):
 
         self._variables = variables
         self._samples   = samples
         self._cuts      = cuts
         self._nuisances = nuisances
+        self._aliases   = aliases
         self._outputDir = outputDir
-
+        self._lumi      = lumi
 
     # _____________________________________________________________________________
     def setConditions(self, silentMode):
@@ -453,6 +547,19 @@ int main() {{
           #
           # print ("length of sample['name'] = ", len(sample['name']))
 
+          weight = sample['weight'] if 'weight' in sample.keys() else "1."
+          weight = f"({weight}) * {self._lumi}"
+
+          #
+          # check if additional "Define" is needed, from "alises"
+          #
+          aliases_to_be_defined = {}
+          for aliasName, alias in self._aliases.items():
+            if 'samples' in alias.keys():
+              if sampleName in alias['samples']:
+                aliases_to_be_defined[aliasName] = alias['expr']
+
+
           for subname, list_root_files in sample['name'].items():
             print ("length of list_root_files = ", len(list_root_files))
             os.system ("mkdir " + self._scripts_run_folder + "/" + sampleName + "/" + subname + "/")
@@ -462,7 +569,7 @@ int main() {{
               tree = "Events"
 
               output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
-              self.create_cpp_source_single_file(name_code, tree, root_file, output_root_file_name, sampleName)
+              self.create_cpp_source_single_file(name_code, tree, root_file, output_root_file_name, sampleName, weight, aliases_to_be_defined)
 
               list_of_files_to_compile.append(name_code)
               # self.compile_cpp(name_code)
@@ -619,6 +726,7 @@ if __name__ == '__main__':
     #
     #    samples.py
     #      --> nuisances.py   since some nuisances are defined only for some samples
+    #      --> aliases.py     since the aliases/defines will be "Defined" only for selected samples
     #    cuts.py
     #      --> nuisances.py   since some nuisances are defined only for some cuts (e.g. lnN of migration)
     #    nuisances.py
@@ -681,10 +789,26 @@ if __name__ == '__main__':
     print ("nuisances = ", nuisances)
 
 
+    #
+    # read list of aliases
+    #
+    aliases = {}
+    if os.path.exists(opt.aliasesFile) :
+      handle = open(opt.aliasesFile,'r')
+      exec(handle.read())
+      handle.close()
+      # clean the dictionary to remove globals due to "exec" funcionality
+      aliases = {k: v for k, v in aliases.items() if not (k.startswith('__') and k.endswith('__'))}
+
+    print ("aliases = ", aliases)
+
+
+
+
 
 
     factory = ShapeFactory()
-    factory.setValues( opt.outputDir, variables, cuts, samples, nuisances )
+    factory.setValues( opt.outputDir, variables, cuts, samples, nuisances , aliases, opt.lumi)
     factory.setConditions (opt.silentMode)
 
     # factory._treeName  = opt.treeName
