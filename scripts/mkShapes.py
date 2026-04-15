@@ -101,7 +101,8 @@ class ShapeFactory:
 
 
     # _____________________________________________________________________________
-    def create_cpp_source_single_file(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight, aliases_to_be_defined):
+    #                                                              "file_path" is a list of root files!
+    def create_cpp_source_list_of_files(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight, aliases_to_be_defined):
         # This is your C++ template as a Python string
 
         define_input_files_logic = ""
@@ -109,7 +110,11 @@ class ShapeFactory:
         define_input_files_logic += f"//  Nominal input files\n"
 
         define_input_files_logic += f'    auto* nominal = new TChain("{tree_name}");\n'
-        define_input_files_logic += f'    nominal->Add("{file_path}");\n'
+
+        # define_input_files_logic += f'    nominal->Add("{file_path}");\n'
+
+        for file_name in file_path:
+          define_input_files_logic += f'    nominal->Add("{file_name}");\n'
 
         #
         # now define the nuisances based on alternative trees
@@ -129,11 +134,6 @@ class ShapeFactory:
         # extract name of root file nominal, without folder path
         #
 
-        # Find the index of the first "/" from the right
-        index = file_path.rfind("/")
-        # Extract everything from that index + 1 to the end
-        # (We add 1 so we don't include the "/" itself)
-        file_path_only_file_no_folder = file_path[index + 1:]
 
         define_input_files_logic += f"//  Variations input files (if any)\n"
 
@@ -141,16 +141,28 @@ class ShapeFactory:
 
           if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
 
+            # One TChain up and one TChain down, then add all the root files
             define_input_files_logic += f'''    auto* friend_{nuisance['mapUp']} = new TChain("{tree_name}");\n'''
-            define_input_files_logic += f'''    friend_{nuisance['mapUp']}->Add("{nuisance['folderUp']}/{file_path_only_file_no_folder}");\n'''
-            define_input_files_logic += f'''    auto varBranches_{nuisance['mapUp']} = getBranchNames(friend_{nuisance['mapUp']});\n'''
-
             define_input_files_logic += f'''    auto* friend_{nuisance['mapDown']} = new TChain("{tree_name}");\n'''
-            define_input_files_logic += f'''    friend_{nuisance['mapDown']}->Add("{nuisance['folderDown']}/{file_path_only_file_no_folder}");\n'''
-            define_input_files_logic += f'''    auto varBranches_{nuisance['mapDown']} = getBranchNames(friend_{nuisance['mapDown']});\n'''
 
+            for file_name in file_path:
+
+              # Find the index of the first "/" from the right
+              index = file_name.rfind("/")
+              # Extract everything from that index + 1 to the end
+              # (We add 1 so we don't include the "/" itself)
+              file_path_only_file_no_folder = file_name[index + 1:]
+
+              define_input_files_logic += f'''    friend_{nuisance['mapUp']}->Add("{nuisance['folderUp']}/{file_path_only_file_no_folder}");\n'''
+              define_input_files_logic += f'''    friend_{nuisance['mapDown']}->Add("{nuisance['folderDown']}/{file_path_only_file_no_folder}");\n'''
+
+            # add friend TChain only once
             define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapUp']}, "{nuisance['mapUp']}");\n'''
             define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapDown']}, "{nuisance['mapDown']}");\n'''
+
+            # varied branches are the same for all "added" trees
+            define_input_files_logic += f'''    auto varBranches_{nuisance['mapUp']} = getBranchNames(friend_{nuisance['mapUp']});\n'''
+            define_input_files_logic += f'''    auto varBranches_{nuisance['mapDown']} = getBranchNames(friend_{nuisance['mapDown']});\n'''
 
 
         define_input_files_logic += f'    ROOT::RDataFrame base_df(*nominal);\n'
@@ -218,7 +230,8 @@ class ShapeFactory:
               register_variations_logic += f'''                                  nomCol,\n'''
               register_variations_logic += f'''                                  expression,\n'''
               register_variations_logic += f'''                                  {{"up"}},\n'''
-              register_variations_logic += f'''                                  "{nuisance['mapUp']}"\n'''
+              # register_variations_logic += f'''                                  "{nuisance['mapUp']}"\n'''
+              register_variations_logic += f'''                                  "{nuisance['name']}"\n'''
               register_variations_logic += f'''                                  );\n'''
               register_variations_logic += f'''      }};\n'''
               register_variations_logic += f'''    }};\n'''
@@ -234,7 +247,8 @@ class ShapeFactory:
               register_variations_logic += f'''                                  nomCol,\n'''
               register_variations_logic += f'''                                  expression,\n'''
               register_variations_logic += f'''                                  {{"do"}},\n'''
-              register_variations_logic += f'''                                  "{nuisance['mapDown']}"\n'''
+              # register_variations_logic += f'''                                  "{nuisance['mapDown']}"\n'''
+              register_variations_logic += f'''                                  "{nuisance['name']}"\n'''
               register_variations_logic += f'''                                  );\n'''
               register_variations_logic += f'''      }};\n'''
               register_variations_logic += f'''    }};\n'''
@@ -261,7 +275,8 @@ class ShapeFactory:
                 register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
                 register_variations_logic += f'''      "my_sample_weight",\n'''
                 register_variations_logic += f'''      "ROOT::RVecD{{{variation_up},{variation_down}}}",\n'''
-                register_variations_logic += f'''      {{"up", "down"}}\n'''
+                register_variations_logic += f'''      {{"up", "do"}},\n'''
+                register_variations_logic += f'''      "{nuisance['name']}"\n'''
                 register_variations_logic += f'''      );\n'''
 
 
@@ -325,6 +340,7 @@ class ShapeFactory:
         cpp_code = f"""
 #include "ROOT/RDataFrame.hxx"
 #include "ROOT/RDFHelpers.hxx"
+#include "ROOT/RVec.hxx"
 
 #include "TFile.h"
 #include "TH1D.h"
@@ -427,10 +443,12 @@ int main() {{
               }}
               else {{
                 temp_name = name.c_str();
-                size_t pos = temp_name.find(':');
-                if (pos != std::string::npos) {{
-                  temp_name = temp_name.substr(0, pos);
-                }}
+                // scale_e_2018_UL:up --> scale_e_2018_ULup
+                temp_name.erase(std::remove(temp_name.begin(), temp_name.end(), ':'), temp_name.end());
+                //size_t pos = temp_name.find(':');
+                //if (pos != std::string::npos) {{
+                //  temp_name = temp_name.substr(0, pos);
+                //}}
                 temp_name = ("histo_{sampleName}_" + temp_name);
               }}
               gDirectory = subdir;
@@ -472,7 +490,7 @@ int main() {{
 
 
     # _____________________________________________________________________________
-    def generate_makefile(self,file_paths, makefile_name="Makefile"):
+    def generate_makefile(self, file_paths, makefile_name="Makefile"):
         # Get ROOT configuration via shell calls
         cpp_flags = "$(shell root-config --cflags)"
         ld_flags = "$(shell root-config --libs)"
@@ -563,16 +581,44 @@ int main() {{
           for subname, list_root_files in sample['name'].items():
             print ("length of list_root_files = ", len(list_root_files))
             os.system ("mkdir " + self._scripts_run_folder + "/" + sampleName + "/" + subname + "/")
-            for i, root_file in enumerate(list_root_files):
+
+            #
+            # Merge together different root files in one single job, not to have billions of jobs :)
+            #
+            make_job_every_N = 1
+            if "FilesPerJob" in sample.keys():
+              make_job_every_N = sample['FilesPerJob']
+            #
+            # create a list of lists of root files, one per job to be submitted
+            # [ [root1, root2, root3], [root4, root5]]
+            #
+            chunks_list_root_files = [list_root_files[i:i + make_job_every_N] for i in range(0, len(list_root_files), make_job_every_N)]
+
+            for i, root_files in enumerate(chunks_list_root_files):
               # name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + str(i)
               name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               tree = "Events"
 
               output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
-              self.create_cpp_source_single_file(name_code, tree, root_file, output_root_file_name, sampleName, weight, aliases_to_be_defined)
+
+              self.create_cpp_source_list_of_files(name_code, tree, root_files, output_root_file_name, sampleName, weight, aliases_to_be_defined)
 
               list_of_files_to_compile.append(name_code)
               # self.compile_cpp(name_code)
+
+
+            # for i, root_file in enumerate(list_root_files):
+            #   # name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + str(i)
+            #   name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
+            #   tree = "Events"
+            #
+            #   output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
+            #
+            #   self.create_cpp_source_single_file(name_code, tree, root_file, output_root_file_name, sampleName, weight, aliases_to_be_defined)
+            #
+            #   list_of_files_to_compile.append(name_code)
+            #   # self.compile_cpp(name_code)
+
 
         self.generate_makefile(list_of_files_to_compile)
 
@@ -595,7 +641,6 @@ int main() {{
         print ("======================")
 
         os.system ("mkdir " + self._script_batch_location + "/")
-        os.system ("mkdir " + self._script_batch_location + "/")
 
         submission_dir = os.getcwd()
 
@@ -607,7 +652,13 @@ int main() {{
 
           for subname, list_root_files in sample['name'].items():
             os.system ("mkdir " + self._script_batch_location + "/" + sampleName + "/" + subname + "/")
-            for i, root_file in enumerate(list_root_files):
+
+            make_job_every_N = 1
+            if "FilesPerJob" in sample.keys():
+              make_job_every_N = sample['FilesPerJob']
+            chunks_list_root_files = [list_root_files[i:i + make_job_every_N] for i in range(0, len(list_root_files), make_job_every_N)]
+
+            for i, root_files in enumerate(chunks_list_root_files):
               name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               name_code_no_folder = "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
               name_bash = self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sh"
@@ -831,10 +882,7 @@ if __name__ == '__main__':
       result = os.system(hadd_cmd)
 
       print ("I have hadded all the root files but I have not removed the original ones")
-
-
-
-
+      print ("I have performed an hadd of all the suitable root files in the folder ... ")
 
     print ("\n\n")
     print (" I'm done ... \n\n")
