@@ -499,7 +499,7 @@ class PlotFactory:
 
                 else :
                   for iBin in range(1, histos[sampleName].GetNbinsX()+1):
-                    tgrData_vx[iBin-1] = (  histos[sampleName].GetBinCenter (iBin))
+                    tgrData_vx[iBin-1] = ( histos[sampleName].GetBinCenter (iBin))
                     tgrData_evx.append( histos[sampleName].GetBinWidth (iBin) / 2.)
                     tgrData_vy[iBin-1] += histos[sampleName].GetBinContent (iBin)
                     if 'isSignal' not in plotdef.keys() or plotdef['isSignal'] == 3 :
@@ -596,9 +596,11 @@ class PlotFactory:
                     continue
 
                   if 'name' in nuisance:
-                    shapeNameVars = tuple(cutName+"/"+variableName+'/histo_' + sampleName+"_"+nuisance['name']+var for var in ['Up', 'Down'])
+                    # shapeNameVars = tuple(cutName+"/"+variableName+'/histo_' + sampleName+"_"+nuisance['name']+var for var in ['Up', 'Down'])
+                    shapeNameVars = tuple(cutName+"/"+variableName+'/histo_' + sampleName+"_"+nuisance['name']+var for var in ['up', 'do'])
                   else:
-                    shapeNameVars = tuple(cutName+"/"+variableName+'/histo_' + sampleName+"_"+nuisanceName+var for var in ['Up', 'Down'])
+                    # shapeNameVars = tuple(cutName+"/"+variableName+'/histo_' + sampleName+"_"+nuisanceName+var for var in ['Up', 'Down'])
+                    shapeNameVars = tuple(cutName+"/"+variableName+'/histo_' + sampleName+"_"+nuisanceName+var for var in ['up', 'do'])
 
                   if 'type' in nuisance and nuisance['type'] == 'lnN':
                     if 'samples' in nuisance:
@@ -630,10 +632,11 @@ class PlotFactory:
                       else:
                         histoVar = fileIn.Get(shapeNameVar)
 
-                      if histoVar != None :
+                      # if histoVar != None :
+                      if histoVar :
                         nuisanceHistos[ivar][nuisanceName] = histoVar
                       elif not self._skipMissingNuisance :
-                        print (" This is bad, the nuisance ", nuisanceName, " is missing! You need to add it, maybe some jobs crashed?")
+                        print (" This is bad, the nuisance ", nuisanceName, "[histo", shapeNameVar, "] is missing! You need to add it, maybe some jobs crashed?")
                         nuisanceHistos[ivar][nuisanceName] = histoVar
                       else :
                         # if you had self._skipMissingNuisance set to true, put the variation the same as the nominal
@@ -647,7 +650,7 @@ class PlotFactory:
                   for nuisanceName, nuisance in mynuisances.items():
                     try:
                       histoVar = nuisanceHistos[ivar][nuisanceName]
-                      test = np.asarray(histoVar)
+                      test = np.asarray(histoVar)[1:-1] # FIXME check if ok like this ...
                     except KeyError:
                       # now, even if not considered this nuisance, I need to add it,
                       # so that in case is "empty" it will add the nominal value
@@ -673,11 +676,11 @@ class PlotFactory:
                     try:
                       vy = nuisances_vy[nuisanceName]
                     except KeyError:
-                      vy = nuisances_vy[nuisanceName] = np.zeros_like(np.asarray(histo))
+                      vy = nuisances_vy[nuisanceName] = np.zeros_like(np.asarray(histo)[1:-1]) # FIXME check if ok like this ...
 
                     # get the background sum
                     if plotdef['isSignal'] == 0:   # ---> add the signal too????? See ~ 20 lines below
-                      vy += np.asarray(histoVar)
+                      vy += np.asarray(histoVar)[1:-1] # FIXME check if ok like this ...
 
               # create the group of histograms to plot
               # this has to be done after the scaling of the previous lines
@@ -716,12 +719,13 @@ class PlotFactory:
             #
             if thsBackground.GetNhists() != 0:
               last = thsBackground.GetStack().Last()
-              tgrMC_vy = np.asarray(last) # , copy=True)
+              tgrMC_vy = np.asarray(last)[1:-1]  # , copy=True) #  [1:-1] # FIXME check if ok like this ...
+              # print (" --------> lenght of tgrMC_vy = ", len(tgrMC_vy))
               for iBin in range(1,thsBackground.GetStack().Last().GetNbinsX()+1):
                 tgrMC_vx .append(thsBackground.GetStack().Last().GetBinCenter(iBin))
                 tgrMC_evx.append(thsBackground.GetStack().Last().GetBinWidth(iBin) / 2.)
-              nuisances_err2_up = np.asarray(last.GetSumw2()) # [1:-1]   FIXME
-              nuisances_err2_do = np.asarray(last.GetSumw2()) # [1:-1]   FIXME
+              nuisances_err2_up = np.asarray(last.GetSumw2())[1:-1] #  FIXME check if ok like this ...
+              nuisances_err2_do = np.asarray(last.GetSumw2())[1:-1] #  FIXME check if ok like this ...
               if (self._removeMCStat):
                 nuisances_err2_up.fill(0)
                 nuisances_err2_do.fill(0)
@@ -820,6 +824,7 @@ class PlotFactory:
             tgrDataOverMC = tgrData.Clone("tgrDataOverMC")
             tgrDataMinusMC = tgrData.Clone("tgrDataMinusMC")
             tgrMCSigMinusMCBkg = tgrData.Clone("tgrMCSigMinusMCBkg")  # is like saying "signal"
+            # print (" --------> lenght of tgrData_vx = ", len(tgrData_vx))
             for iBin in range(0, len(tgrData_vx)) :
               tgrDataOverMC.SetPoint     (iBin, tgrData_vx[iBin], self.Ratio(tgrData_vy[iBin] , last.GetBinContent(iBin+1)) )
               tgrDataOverMC.SetPointError(iBin, tgrData_evx[iBin], tgrData_evx[iBin], self.Ratio(tgrData_evy_do[iBin], last.GetBinContent(iBin+1)) , self.Ratio(tgrData_evy_up[iBin], last.GetBinContent(iBin+1)) )
@@ -878,25 +883,29 @@ class PlotFactory:
             else:
               histo_total = fileIn.Get(special_shapeName)
 
-            if variable['divideByBinWidth'] == 1 and histo_total != None:
+            # if variable['divideByBinWidth'] == 1 and histo_total != None:
+            if variable['divideByBinWidth'] == 1 and histo_total:
               histo_total.Scale(1,"width")
             print ('--> histo_total = ', histo_total)
 
             #                                  if there is "histo_total" there is no need of explicit nuisances
-            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            # if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total:
               tgrMC = ROOT.TGraphAsymmErrors()
               for iBin in range(0, len(tgrMC_vx)) :
-                tgrMC.SetPoint     (iBin, tgrMC_vx[iBin], tgrMC_vy[iBin])
+                tgrMC.SetPoint(iBin, tgrMC_vx[iBin], tgrMC_vy[iBin])
                 if histo_total:
                   #
                   # if there is histo_total, we plot the uncertainty band on top of sig+bkg, since histo_total IS sig+bkg and it's uncertainty accordingly
                   # This fix, in case of histo_total overrules the comment
                   # few lines above "Is this what you want? I hope so ..."
                   #
+                  # print (" ::::                           DEBUG: iBin, tgrMC_vx[iBin], histo_total.GetBinContent(iBin+1) = ", iBin , ", ", tgrMC_vx[iBin], ", ", histo_total.GetBinContent(iBin+1))
                   tgrMC.SetPoint(iBin, tgrMC_vx[iBin], histo_total.GetBinContent(iBin+1))
                   tgrMC.SetPointError(iBin, tgrMC_evx[iBin], tgrMC_evx[iBin], histo_total.GetBinError(iBin+1), histo_total.GetBinError(iBin+1))
                 else :
                   tgrMC.SetPointError(iBin, tgrMC_evx[iBin], tgrMC_evx[iBin], nuisances_err_do[iBin], nuisances_err_up[iBin])
+                  # print (" ::::                           DEBUG: iBin, tgrMC_evx[iBin], tgrMC_vx[iBin], tgrMC_vy[iBin], nuisances_err_do[iBin], nuisances_err_up[iBin] = ", iBin, ", ", tgrMC_evx[iBin], ", ", tgrMC_vx[iBin], ", ", tgrMC_vy[iBin], ", ", nuisances_err_do[iBin], ", ", nuisances_err_up[iBin])
 
               tgrMCOverMC = tgrMC.Clone("tgrMCOverMC")
               tgrMCMinusMC = tgrMC.Clone("tgrMCMinusMC")
@@ -1114,7 +1123,8 @@ class PlotFactory:
 
             # if there is a systematic band draw it
             #                               if there is "histo_total" there is no need of explicit nuisances
-            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            # if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total:
               tgrMC.SetLineColor(12)
               tgrMC.SetFillColor(12)
               tgrMC.SetLineWidth(2)
@@ -1252,7 +1262,8 @@ class PlotFactory:
             # add "All MC" in the legend
             if not self._removeAllMC :
               #                     if there is "histo_total" there is no need of explicit nuisances
-              if len(mynuisances.keys()) != 0 or histo_total!= None:
+              # if len(mynuisances.keys()) != 0 or histo_total!= None:
+              if len(mynuisances.keys()) != 0 or histo_total:
                   if self._showIntegralLegend == 0 :
                       tlegend.AddEntry(tgrMC, "Syst.", "F")
                   else :
@@ -1398,7 +1409,8 @@ class PlotFactory:
                   histo.Draw("hist same")
 
             #                               if there is "histo_total" there is no need of explicit nuisances
-            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            # if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total:
               tgrMC.Draw("2")
 
             #     - then the superimposed MC
@@ -1461,7 +1473,8 @@ class PlotFactory:
             # frameRatio.GetYaxis().SetRangeUser( 0.5, 1.5 )
             self.Pad2TAxis(frameRatio)
             #                               if there is "histo_total" there is no need of explicit nuisances
-            if (not self._removeMCStat)  or len(mynuisances.keys()) != 0 or histo_total!= None:
+            # if (not self._removeMCStat)  or len(mynuisances.keys()) != 0 or histo_total!= None:
+            if (not self._removeMCStat)  or len(mynuisances.keys()) != 0 or histo_total:
               tgrMCOverMC.Draw("2")
 
             tgrDataOverMC.Draw("P0")
@@ -1612,7 +1625,8 @@ class PlotFactory:
                   histo.Draw("hist same")
 
             #                               if there is "histo_total" there is no need of explicit nuisances
-            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            # if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total:
               tgrMC.Draw("2")
 
             #     - then the superimposed MC
@@ -1676,7 +1690,8 @@ class PlotFactory:
               frameDifference.GetYaxis().SetRangeUser(  int (ROOT.TMath.MinElement(tgrDataMinusMC.GetN(),tgrDataMinusMC.GetY()) - 2 ),  int (ROOT.TMath.MaxElement(tgrDataMinusMC.GetN(),tgrDataMinusMC.GetY()) + 2 ) )
             self.Pad2TAxis(frameDifference)
             #                               if there is "histo_total" there is no need of explicit nuisances
-            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            # if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
+            if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total:
               tgrMCMinusMC.SetLineColor(12)
               tgrMCMinusMC.SetFillColor(12)
               tgrMCMinusMC.SetLineWidth(2)
@@ -1806,7 +1821,8 @@ class PlotFactory:
                                                     int (ROOT.TMath.MaxElement(tgrDataMinusMC.GetN(),tgrDataMinusMC.GetY()) + int ( ROOT.TMath.MaxElement(tgrDataMinusMC.GetN(),tgrDataMinusMC.GetEYhigh()) ) + 20 ) )
 
               #                               if there is "histo_total" there is no need of explicit nuisances
-              if (not self._removeMCStat)  or len(mynuisances.keys()) != 0 or histo_total!= None:
+              # if (not self._removeMCStat)  or len(mynuisances.keys()) != 0 or histo_total!= None:
+              if (not self._removeMCStat)  or len(mynuisances.keys()) != 0 or histo_total:
                 tgrMCMinusMC.SetLineColor(12)
                 tgrMCMinusMC.SetFillColor(12)
                 tgrMCMinusMC.SetLineWidth(2)
@@ -2358,7 +2374,8 @@ class PlotFactory:
                       weight_X_thsSignal.Draw("hist same noclear")
 
                     #                               if there is "histo_total" there is no need of explicit nuisances
-                    if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    # if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    if len(mynuisances.keys()) != 0 or histo_total:
                       weight_X_tgrMC.SetLineColor(12)
                       weight_X_tgrMC.SetFillColor(12)
                       weight_X_tgrMC.SetFillStyle(3004)
@@ -2404,7 +2421,8 @@ class PlotFactory:
                     self.Pad2TAxis(weight_X_frameRatio)
 
                     #                               if there is "histo_total" there is no need of explicit nuisances
-                    if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    # if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    if len(mynuisances.keys()) != 0 or histo_total:
                       weight_X_tgrMCOverMC.SetLineColor(12)
                       weight_X_tgrMCOverMC.SetFillColor(12)
                       weight_X_tgrMCOverMC.SetFillStyle(3004)
@@ -2437,7 +2455,8 @@ class PlotFactory:
                     weight_X_tgrMCOverMC.Write()
                     weight_X_tgrDataOverMC.Write()
                     #                               if there is "histo_total" there is no need of explicit nuisances
-                    if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    # if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    if len(mynuisances.keys()) != 0 or histo_total:
                       weight_X_tgrMC.Write("weight_X_tgrMC")
                     if weight_X_tgrData.GetN() != 0:
                       weight_X_tgrData.Write("weight_X_tgrData")
@@ -2497,7 +2516,8 @@ class PlotFactory:
                     self.Pad2TAxis(weight_X_frameRatio)
 
                     #                               if there is "histo_total" there is no need of explicit nuisances
-                    if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    # if len(mynuisances.keys()) != 0 or histo_total!= None:
+                    if len(mynuisances.keys()) != 0 or histo_total:
                       weight_X_tgrMCMinusMC.SetLineColor(12)
                       weight_X_tgrMCMinusMC.SetFillColor(12)
                       weight_X_tgrMCMinusMC.SetFillStyle(3004)

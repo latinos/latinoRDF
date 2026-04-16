@@ -317,16 +317,62 @@ class ShapeFactory:
         # In root file:    <cut>/<variable>/histo_<sample>
         #
         for cutName, cut in self._cuts.items():
-          define_variables_logic += f'    auto node_{cutName} = current_node.Filter("{cut}", "{cutName}");\n'
+          #
+          # cuts could be nested, i.e. cut -> categories
+          # here is where you exploit the full power of RDataFrame
+          #
+          # Procedure:
+          # - check if categories
+          # - if yes, then define the cuts in a nested way
+          # - otherwise if "expr" is defined use it
+          #   if note use directly "cut"
+          #
+          # Different possibilities:
+          #
+          # cut["DY"] = "mll>50 && mll<120"
+          # cut["DY"] = {   'expr': 'mll>70 && mll<110' }
+          # cut["DY"] = {
+          #    'expr': 'mll>70 && mll<110',
+          #    'categories' : {
+          #       'eleele' : 'ee',   # "ee" is defined in aliases.py
+          #       'mumu'   : 'mm',   # "mm" is defined in aliases.py
+          #      }
+          #    }
+          #
 
-          for variableName, variable in self._variables.items():
-              (bins, v_min, v_max) = variable['range']
-              # FIXME: folding needed
+          list_cuts = {}
+          if isinstance(cut, dict):
+            # "cut" is a dictionary
+            expression = cut['expr']
+            categories = cut.get('categories', {})
+            if categories :
+              list_cuts[ cutName ] = "(" + expression + ")"   # add the un-categorized phase space too! it comes "for free"
+              for category_name, category in categories.items():
+                list_cuts[ cutName + "_" + category_name] = "(" + expression + ") && (" + category + ")"
+            else :
+              list_cuts[ cutName ] = expression
+          else :
+            list_cuts[ cutName ] = cut
 
-              # We add each RResultPtr to a vector called 'histograms'
-              # define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}"));\n'
-              define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "my_sample_weight"));\n'
-              # define_variables_logic += f'    hist_map["{cutName}"].push_back(node_{cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "{weight}"));\n'
+
+          mother_cut_name = ""
+          for icut, (this_cutName, this_cut) in enumerate(list_cuts.items()):
+            if len(list_cuts) > 1 :
+              if icut == 0:
+                define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
+                mother_cut_name = this_cutName
+              else:
+                # with this I'm nesting the node into the "mother node" -> it's RDataFrame power
+                define_variables_logic += f'    auto node_{this_cutName} = node_{mother_cut_name}.Filter("{this_cut}", "{this_cutName}");\n'
+            else :
+              define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
+
+            for variableName, variable in self._variables.items():
+                (bins, v_min, v_max) = variable['range']
+                # FIXME: folding needed
+
+                # We add each RResultPtr to a vector called 'histograms'
+                define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "my_sample_weight"));\n'
 
 
         define_variables_logic += f'    \n'
@@ -565,8 +611,21 @@ int main() {{
           #
           # print ("length of sample['name'] = ", len(sample['name']))
 
+
           weight = sample['weight'] if 'weight' in sample.keys() else "1."
-          weight = f"({weight}) * {self._lumi}"
+
+          #
+          # check if "isData". If NOT isData then multiply by lumi otherwise no
+          #
+          if 'isData' in sample.keys() :
+            if not (len(sample ['isData']) == 1 and sample ['isData'][0] == 'all') :
+              # if you put 'all', all the root files are considered "data"
+              # ok, it's data ... and so now?
+              #
+              pass
+          else : # default is "scale to luminosity"
+            weight = f"({weight}) * {self._lumi}"
+
 
           #
           # check if additional "Define" is needed, from "alises"
