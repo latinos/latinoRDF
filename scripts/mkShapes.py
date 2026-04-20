@@ -72,6 +72,8 @@ class ShapeFactory:
         cuts = {}
         self._cuts = cuts
 
+        self._supercut = ''
+
         samples = {}
         self._samples = samples
 
@@ -310,6 +312,15 @@ class ShapeFactory:
         for variableName, variable in self._variables.items():
             name = variable['name']
             define_variables_logic += f'    current_node = SafeDefine(current_node, "{variableName}", "{name}");\n'
+
+
+        #
+        # if "supercut" is defined, use it to speed up
+        #
+        if self._supercut != '' :
+          define_variables_logic += f'    current_node = current_node.Filter("{self._supercut}", "supercut");\n'
+
+
 
         #
         # once all variables are defined, they can be used and plotted with "variableName"
@@ -567,11 +578,12 @@ int main() {{
 
 
     # _____________________________________________________________________________
-    def setValues(self, outputDir, variables, cuts, samples, nuisances, aliases, lumi):
+    def setValues(self, outputDir, variables, cuts, supercut, samples, nuisances, aliases, lumi):
 
         self._variables = variables
         self._samples   = samples
         self._cuts      = cuts
+        self._supercut  = supercut
         self._nuisances = nuisances
         self._aliases   = aliases
         self._outputDir = outputDir
@@ -614,6 +626,11 @@ int main() {{
 
           weight = sample['weight'] if 'weight' in sample.keys() else "1."
 
+          # weight per "sub-dataset"
+          weights_subname = sample['weights'] if 'weights' in sample.keys() else {}
+
+
+
           #
           # check if "isData". If NOT isData then multiply by lumi otherwise no
           #
@@ -640,6 +657,13 @@ int main() {{
           for subname, list_root_files in sample['name'].items():
             print ("length of list_root_files = ", len(list_root_files))
             os.system ("mkdir " + self._scripts_run_folder + "/" + sampleName + "/" + subname + "/")
+
+            # if weights per subname are listed, use them
+            # e.g. per PD weights in data
+            #
+            if subname in weights_subname.keys():
+              weight = f"({weight}) * ({weights_subname[subname]})"
+
 
             #
             # Merge together different root files in one single job, not to have billions of jobs :)
@@ -875,6 +899,7 @@ if __name__ == '__main__':
     # read list of cuts
     #
     cuts = {}
+    supercut = ''
     if os.path.exists(opt.cutsFile) :
       handle = open(opt.cutsFile,'r')
       exec(handle.read())
@@ -883,6 +908,7 @@ if __name__ == '__main__':
       cuts = {k: v for k, v in cuts.items() if not (k.startswith('__') and k.endswith('__'))}
 
     print ("cuts = ", cuts)
+    print ("supercut = ", supercut)
 
 
     #
@@ -918,7 +944,7 @@ if __name__ == '__main__':
 
 
     factory = ShapeFactory()
-    factory.setValues( opt.outputDir, variables, cuts, samples, nuisances , aliases, opt.lumi)
+    factory.setValues( opt.outputDir, variables, cuts, supercut, samples, nuisances , aliases, opt.lumi)
     factory.setConditions (opt.silentMode)
 
     # factory._treeName  = opt.treeName

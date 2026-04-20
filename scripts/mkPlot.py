@@ -139,6 +139,30 @@ class PlotFactory:
         self._legend         = legend
 
 
+        # expand "cuts" including categories
+        list_cuts = {}
+        for cutName, cut in cuts.items():
+
+          if isinstance(cut, dict):
+            # "cut" is a dictionary
+            expression = cut['expr']
+            categories = cut.get('categories', {})
+            if categories :
+              list_cuts[ cutName ] = "(" + expression + ")"   # add the un-categorized phase space too! it comes "for free"
+              for category_name, category in categories.items():
+                list_cuts[ cutName + "_" + category_name] = "(" + expression + ") && (" + category + ")"
+            else :
+              list_cuts[ cutName ] = expression
+          else :
+            list_cuts[ cutName ] = cut
+
+        self._cuts = list_cuts
+
+        # print (" ::::::::::::: self._cuts = ", self._cuts)
+
+
+
+
 
     # _____________________________________________________________________________
     def setConditions(self,
@@ -3111,6 +3135,7 @@ if __name__ == '__main__':
     # FIXME: add it as configurable ...
     #
     inputFile = opt.outputDir +"/root_file_joined.root"
+    # inputFile = "." +"/root_file_joined.root"
 
 
     factory = PlotFactory()
