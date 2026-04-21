@@ -624,11 +624,10 @@ int main() {{
           # print ("length of sample['name'] = ", len(sample['name']))
 
 
-          weight = sample['weight'] if 'weight' in sample.keys() else "1."
+          global_weight = sample['weight'] if 'weight' in sample.keys() else "1."
 
           # weight per "sub-dataset"
           weights_subname = sample['weights'] if 'weights' in sample.keys() else {}
-
 
 
           #
@@ -641,7 +640,7 @@ int main() {{
               #
               pass
           else : # default is "scale to luminosity"
-            weight = f"({weight}) * {self._lumi}"
+            global_weight = f"({global_weight}) * {self._lumi}"
 
 
           #
@@ -662,8 +661,9 @@ int main() {{
             # e.g. per PD weights in data
             #
             if subname in weights_subname.keys():
-              weight = f"({weight}) * ({weights_subname[subname]})"
-
+              weight = f"({global_weight}) * ({weights_subname[subname]})"
+            else :
+              weight = global_weight
 
             #
             # Merge together different root files in one single job, not to have billions of jobs :)

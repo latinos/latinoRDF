@@ -3031,7 +3031,7 @@ if __name__ == '__main__':
     #    samples.py
     #      --> nuisances.py   since some nuisances are defined only for some samples
     #      --> aliases.py     since the aliases/defines will be "Defined" only for selected samples
-    #      --> plot.py        FIXME
+    #      --> plot.py        since the list of samples has to match the list of samples in plot.py
     #    cuts.py
     #      --> nuisances.py   since some nuisances are defined only for some cuts (e.g. lnN of migration)
     #    nuisances.py
@@ -3092,21 +3092,6 @@ if __name__ == '__main__':
       nuisances = {k: v for k, v in nuisances.items() if not (k.startswith('__') and k.endswith('__'))}
 
     print ("nuisances = ", nuisances)
-
-
-    #
-    # read list of aliases
-    #
-    # aliases = {}
-    # if os.path.exists(opt.aliasesFile) :
-    #   handle = open(opt.aliasesFile,'r')
-    #   exec(handle.read())
-    #   handle.close()
-    #   # clean the dictionary to remove globals due to "exec" funcionality
-    #   aliases = {k: v for k, v in aliases.items() if not (k.startswith('__') and k.endswith('__'))}
-    #
-    # print ("aliases = ", aliases)
-
 
 
     #
