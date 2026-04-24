@@ -310,8 +310,13 @@ class ShapeFactory:
         define_variables_logic += f"//  I need to define the RNode, otherwise SafeDefine will not work\n"
         define_variables_logic += f"    // Define variables \n"
         for variableName, variable in self._variables.items():
+          if 'is2d' in variable.keys() and variable['is2d'] == 1:
+            pass
+          else:
+            # only for 1D variables
             name = variable['name']
             define_variables_logic += f'    current_node = SafeDefine(current_node, "{variableName}", "{name}");\n'
+
 
 
         #
@@ -379,18 +384,105 @@ class ShapeFactory:
               define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
 
             for variableName, variable in self._variables.items():
-                (bins, v_min, v_max) = variable['range']
-                # FIXME: folding needed
+                #  Different options for range definition:
+                #
+                #  1D histograms:
+                #     'range' : (200,10,500),
+                #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200]),
+                #
+                #  2D histograms:
+                #     'range' : (5, 0.0, 1.0, 10,  0., 10000.),
+                #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200],[60, 95, 110, 135, 200],),
+                #
+
+                variable_range = variable['range']
+                model_str = ""
+
+                if isinstance(variable_range, list):
+                  # 1D
+                  #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200]),
+                  #
+                  bins = len(variable_range) - 1
+                  # Convert Python list [12, 17...] to C++ string "12, 17, ..."
+                  edges_str = ", ".join(map(str, variable_range))
+                  model_str = f'{bins}, (const double[]){{{edges_str}}}'
+                elif isinstance(variable_range, tuple):
+                  if len(variable_range) == 3:
+                    # 1D
+                    #     'range' : (200,10,500),
+                    #
+                    bins, v_min, v_max = variable_range
+                    model_str = f'{bins}, {v_min}, {v_max}'
+
+                  elif len(variable_range) == 6:
+                    # 2D
+                    #     'range' : (5, 0.0, 1.0, 10,  0., 10000.),
+                    #
+                    model_str = ", ".join(map(str, variable_range))
+
+                  elif len(variable_range) == 2 and isinstance(variable_range[0], list):
+                    # 2D
+                    #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200],[60, 95, 110, 135, 200],),
+                    #
+                    nx, ny = len(variable_range[0]) - 1, len(variable_range[1]) - 1
+                    ex = ", ".join(map(str, variable_range[0]))
+                    ey = ", ".join(map(str, variable_range[1]))
+                    model_str = f'{nx}, (const double[]){{{ex}}}, {ny}, (const double[]){{{ey}}}'
+
+                #
+                # different booking depending if it is a 1D or 2D histogram
+                #
+
+                if 'is2d' in variable.keys() and variable['is2d'] == 1:
+                  # print ("variable['name'].split(':')", variable['name'].split(':'))
+                  # Split "varX:varY" into separate columns
+                  v_x, v_y = variable['name'].split(':')
+                  histo_call = f'Histo2D({{"h_{variableName}", "{variableName}", {model_str}}}, "{v_x}", "{v_y}", "my_sample_weight")'
+
+                  # We add each RResultPtr to a vector called 'histograms'
+                  define_variables_logic += f'    hist_map_2D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+
+                else:
+                  histo_call = f'Histo1D({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight")'
+
+                  # We add each RResultPtr to a vector called 'histograms'
+                  define_variables_logic += f'    hist_map_1D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+
+                # # We add each RResultPtr to a vector called 'histograms'
+                # define_variables_logic += f'    hist_map_1D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(ROOT::RDF::RResultPtr<TH1D> (node_{this_cutName}.{histo_call}) );\n'
 
                 # We add each RResultPtr to a vector called 'histograms'
-                define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "my_sample_weight"));\n'
+                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight"));\n'
+
+
+###                 (bins, v_min, v_max) = variable['range']
+###                 # We add each RResultPtr to a vector called 'histograms'
+###                 define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "my_sample_weight"));\n'
 
 
         define_variables_logic += f'    \n'
-        define_variables_logic += f'    std::vector<std::string> list_of_variables;\n'
-        for variableName, variable in self._variables.items():
-          define_variables_logic += f'    list_of_variables.push_back("{variableName}");\n'
+        define_variables_logic += f'    std::vector<std::string> list_of_variables_1D;\n'
+        define_variables_logic += f'    std::vector<std::string> list_of_variables_2D;\n'
+        define_variables_logic += f'    std::vector<int> list_of_variables_fold_1D;\n'
+        define_variables_logic += f'    std::vector<int> list_of_variables_fold_2D;\n'
 
+        for variableName, variable in self._variables.items():
+          if 'is2d' in variable.keys() and variable['is2d'] == 1:
+            #  2D::   vary:varx
+            define_variables_logic += f'    list_of_variables_2D.push_back("{variableName}");\n'
+            if 'fold' in variable.keys():
+              define_variables_logic += f'    list_of_variables_fold_2D.push_back({variable["fold"]});\n'
+            else :
+              define_variables_logic += f'    list_of_variables_fold_2D.push_back(0);\n'
+          else :
+            #  1D::   var
+            define_variables_logic += f'    list_of_variables_1D.push_back("{variableName}");\n'
+            if 'fold' in variable.keys():
+              define_variables_logic += f'    list_of_variables_fold_1D.push_back({variable["fold"]});\n'
+            else :
+              define_variables_logic += f'    list_of_variables_fold_1D.push_back(0);\n'
 
 
 
@@ -408,6 +500,134 @@ class ShapeFactory:
 #include <iostream>
 #include <string>
 #include <typeinfo>
+
+//
+// doFold
+//   0 = no
+//   1 = overflow
+//   2 = underflow
+//   3 = overflow and underflow
+//
+
+//                 TH1 works for TH1F, TH2F, ...
+void FoldHistogram(TH1* h, int doFold) {{
+
+  // 1D historgram
+  if (h->GetDimension() == 1) {{
+
+    // Get the number of visible bins
+    int nBins = h->GetNbinsX();
+
+    // overflow
+    if (doFold == 1 || doFold == 3) {{
+      double content_last     = h->GetBinContent(nBins);
+      double error_last       = h->GetBinError(nBins);
+      double content_overflow = h->GetBinContent(nBins+1);
+      double error_overflow   = h->GetBinError(nBins+1);
+
+      h->SetBinContent(nBins, content_last + content_overflow);
+      h->SetBinError(nBins, std::sqrt(error_last*error_last + error_overflow*error_overflow));
+
+      h->SetBinContent(nBins + 1, 0);
+      h->SetBinError(nBins + 1, 0);
+
+    }}
+
+    // underflow
+    if (doFold == 2 || doFold == 3) {{
+
+      double content_first     = h->GetBinContent(1);
+      double error_first       = h->GetBinError(1);
+      double content_underflow = h->GetBinContent(0);
+      double error_underflow   = h->GetBinError(0);
+
+      h->SetBinContent(1, content_first + content_underflow);
+      h->SetBinError(1, std::sqrt(error_first*error_first + error_underflow*error_underflow));
+
+      h->SetBinContent(0, 0);
+      h->SetBinError(0, 0);
+
+    }}
+
+  }}
+  // 2D histogram (com'on you don't need a 3D version ...)
+  else {{
+
+    int nX = h->GetNbinsX();
+    int nY = h->GetNbinsY();
+
+    // overflow
+    if (doFold == 1 || doFold == 3) {{
+      for (int iy = 0; iy <= nY + 1; ++iy) {{
+        h->SetBinContent(nX, iy, h->GetBinContent(nX, iy) + h->GetBinContent(nX + 1, iy));
+        h->SetBinError(nX, iy, std::hypot(h->GetBinError(nX, iy), h->GetBinError(nX + 1, iy)));
+        h->SetBinContent(nX + 1, iy, 0);
+        h->SetBinError(nX + 1, iy, 0);
+      }}
+      for (int ix = 0; ix <= nX + 1; ++ix) {{
+        h->SetBinContent(ix, nY, h->GetBinContent(ix, nY) + h->GetBinContent(ix, nY + 1));
+        h->SetBinError(ix, nY, std::hypot(h->GetBinError(ix, nY), h->GetBinError(ix, nY + 1)));
+        h->SetBinContent(ix, nY + 1, 0);
+        h->SetBinError(ix, nY + 1, 0);
+      }}
+    }}
+
+    // underflow
+    if (doFold == 2 || doFold == 3) {{
+      for (int iy = 0; iy <= nY + 1; ++iy) {{
+        h->SetBinContent(1, iy, h->GetBinContent(1, iy) + h->GetBinContent(0, iy));
+        h->SetBinError(1, iy, std::hypot(h->GetBinError(1, iy), h->GetBinError(0, iy)));
+        h->SetBinContent(0, iy, 0);
+        h->SetBinError(0, iy, 0);
+      }}
+      for (int ix = 0; ix <= nX + 1; ++ix) {{
+        h->SetBinContent(ix, 1, h->GetBinContent(ix, 1) + h->GetBinContent(ix, 0));
+        h->SetBinError(ix, 1, std::hypot(h->GetBinError(ix, 1), h->GetBinError(ix, 0)));
+        h->SetBinContent(ix, 0, 0);
+        h->SetBinError(ix, 0, 0);
+      }}
+    }}
+
+  }}
+
+
+}}
+
+
+// --- transform 2D into 1D: unrolling
+//
+//      3    6    9
+//      2    5    8
+//      1    4    7
+//
+
+
+TH1D* UnrollHistogram(TH2D* h2) {{
+
+  int nBinsX = h2->GetNbinsX();
+  int nBinsY = h2->GetNbinsY();
+  int totalBins = nBinsX * nBinsY;
+
+  // Create a 1D histogram with the same name (plus a suffix)
+  TString name = h2->GetName();
+  TString title = h2->GetTitle();
+  h2->SetName(name + "_old"); // Rename original to avoid conflict
+
+  TH1D* h1 = new TH1D(name, title, totalBins, 0.5, totalBins + 0.5);
+  h1->Sumw2();
+
+  int i1D = 1;
+  for (int iy = 1; iy <= nBinsY; ++iy) {{
+      for (int ix = 1; ix <= nBinsX; ++ix) {{
+          h1->SetBinContent(i1D, h2->GetBinContent(ix, iy));
+          h1->SetBinError(i1D, h2->GetBinError(ix, iy));
+          i1D++;
+      }}
+  }}
+
+  return h1;
+}}
+
 
 
 
@@ -439,7 +659,8 @@ int main() {{
 
     // ----------------------------------------
 
-    std::map<std::string, std::vector<ROOT::RDF::RResultPtr<TH1D>>> hist_map;
+    std::map<std::string, std::vector<ROOT::RDF::RResultPtr<TH1D>>> hist_map_1D;
+    std::map<std::string, std::vector<ROOT::RDF::RResultPtr<TH2D>>> hist_map_2D;
 
     // --- Automatically generated define aliases ---
 
@@ -480,41 +701,98 @@ int main() {{
     //
 
     TFile out_file("{self._outputDir}/{output_root_file_name}", "RECREATE");
-    for (auto& [cut_label, h_list] : hist_map) {{
+    for (auto& [cut_label, h_list] : hist_map_1D) {{
         // Create a folder for this cut
         TDirectory *dir = out_file.mkdir(cut_label.c_str());
         int ivar = 0;
         for (auto& h : h_list) {{
-            dir->cd();
-            TDirectory *subdir = out_file.mkdir( (cut_label+"/"+list_of_variables.at(ivar)).c_str() );
-            subdir->cd();
-            ivar++;
+          dir->cd();
+          TDirectory *subdir = out_file.mkdir( (cut_label+"/"+list_of_variables_1D.at(ivar)).c_str() );
+          subdir->cd();
 
-            // get the nominal and the variations too
-            auto all_histos = ROOT::RDF::Experimental::VariationsFor(h);
+          // get the nominal and the variations too
+          auto all_histos = ROOT::RDF::Experimental::VariationsFor(h);
 
-            for (auto& [name, histo] : all_histos) {{
-              std::string temp_name;
-              if (name == "nominal") {{
-                  temp_name = "histo_{sampleName}";
-              }}
-              else {{
-                temp_name = name.c_str();
-                // scale_e_2018_UL:up --> scale_e_2018_ULup
-                temp_name.erase(std::remove(temp_name.begin(), temp_name.end(), ':'), temp_name.end());
-                //size_t pos = temp_name.find(':');
-                //if (pos != std::string::npos) {{
-                //  temp_name = temp_name.substr(0, pos);
-                //}}
-                temp_name = ("histo_{sampleName}_" + temp_name);
-              }}
-              gDirectory = subdir;
-              histo->SetName(temp_name.c_str());
-              histo->Write();
+          for (auto& [name, histo] : all_histos) {{
+            std::string temp_name;
+            if (name == "nominal") {{
+                temp_name = "histo_{sampleName}";
             }}
+            else {{
+              temp_name = name.c_str();
+              // scale_e_2018_UL:up --> scale_e_2018_ULup
+              temp_name.erase(std::remove(temp_name.begin(), temp_name.end(), ':'), temp_name.end());
+              //size_t pos = temp_name.find(':');
+              //if (pos != std::string::npos) {{
+              //  temp_name = temp_name.substr(0, pos);
+              //}}
+              temp_name = ("histo_{sampleName}_" + temp_name);
+            }}
+            gDirectory = subdir;
+            histo->SetName(temp_name.c_str());
+
+            if (list_of_variables_fold_1D.at(ivar) != 0) FoldHistogram(histo.get(), list_of_variables_fold_1D.at(ivar));
+
+            histo->Write();
+
+          }}
+          ivar++;
         }}
         out_file.cd(); // Go back to root for the next directory
     }}
+
+
+    for (auto& [cut_label, h_list] : hist_map_2D) {{
+        // Create a folder for this cut
+        TDirectory *dir = out_file.GetDirectory(cut_label.c_str());
+        if (!dir) {{
+          // If it doesn't exist, create it
+          dir = out_file.mkdir(cut_label.c_str());
+        }}
+        int ivar = 0;
+        for (auto& h : h_list) {{
+          dir->cd();
+          TDirectory *subdir = out_file.GetDirectory( (cut_label+"/"+list_of_variables_2D.at(ivar)).c_str() );
+          if (!subdir) {{
+            // If it doesn't exist, create it
+            subdir = out_file.mkdir( (cut_label+"/"+list_of_variables_2D.at(ivar)).c_str() );
+          }}
+          subdir->cd();
+
+          // get the nominal and the variations too
+          auto all_histos = ROOT::RDF::Experimental::VariationsFor(h);
+
+          for (auto& [name, histo] : all_histos) {{
+            std::string temp_name;
+            if (name == "nominal") {{
+                temp_name = "histo_{sampleName}";
+            }}
+            else {{
+              temp_name = name.c_str();
+              // scale_e_2018_UL:up --> scale_e_2018_ULup
+              temp_name.erase(std::remove(temp_name.begin(), temp_name.end(), ':'), temp_name.end());
+              //size_t pos = temp_name.find(':');
+              //if (pos != std::string::npos) {{
+              //  temp_name = temp_name.substr(0, pos);
+              //}}
+              temp_name = ("histo_{sampleName}_" + temp_name);
+            }}
+            gDirectory = subdir;
+            histo->SetName(temp_name.c_str());
+
+
+            if (list_of_variables_fold_2D.at(ivar) != 0) FoldHistogram(histo.get(), list_of_variables_fold_2D.at(ivar));
+
+            UnrollHistogram(dynamic_cast<TH2D*>(histo.get()))->Write();
+
+          }}
+          ivar++;
+        }}
+        out_file.cd(); // Go back to root for the next directory
+    }}
+
+
+
     out_file.Close();
 
     return 0;
@@ -717,6 +995,40 @@ int main() {{
 
 
     # _____________________________________________________________________________
+    def checkBatch(self):
+
+        print ("=====================")
+        print ("==== check Batch ====")
+        print ("=====================")
+
+        list_jobs_with_error = []
+        #
+        # Loop over samples
+        #
+        for sampleName, sample in self._samples.items():
+          for subname, list_root_files in sample['name'].items():
+            make_job_every_N = 1
+            if "FilesPerJob" in sample.keys():
+              make_job_every_N = sample['FilesPerJob']
+            chunks_list_root_files = [list_root_files[i:i + make_job_every_N] for i in range(0, len(list_root_files), make_job_every_N)]
+            for i, root_files in enumerate(chunks_list_root_files):
+              name_err_file = self._script_batch_location + "/" + sampleName + "/" + subname + "/log/" + "my_script_" + str(i) + ".sh.err"
+              with open(name_err_file, 'r') as f:
+                line_count = sum(1 for line in f)
+                if line_count > 6: # should I remove the warnings to have 0? FIXME
+                  list_jobs_with_error.append(name_err_file)
+
+        if len(list_jobs_with_error) == 0:
+          print (" No jobs with error ")
+        else:
+          print(" Jobs with errors:")
+          for index, job in enumerate(list_jobs_with_error):
+            print(f"Job {index}: {job}")
+
+
+
+
+
     def submitBatch(self):
 
         print ("======================")
@@ -829,6 +1141,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--submitBatch", action='store_true', dest="submitBatch",   help="Trigger the submission to lxbatch")
     parser.add_argument("--hadd",        action='store_true', dest="haddRootFiles", help="Trigger the merging of the root files")
+    parser.add_argument("--checkBatch",  action='store_true', dest="checkBatch",    help="Check if jobs are done succesfully")
     parser.add_argument("--silentMode",  action='store_true', dest="silentMode",    help="Remove as much as possible the print and the log/err files production")
 
     opt = parser.parse_args()
@@ -847,6 +1160,7 @@ if __name__ == '__main__':
 
     print ("opt.submitBatch      = ", opt.submitBatch)
     print ("opt.hadd             = ", opt.haddRootFiles)
+    print ("opt.checkBatch       = ", opt.checkBatch)
     print ("opt.silentMode       = ", opt.silentMode)
 
 
@@ -952,7 +1266,7 @@ if __name__ == '__main__':
     # factory._lumi      = opt.lumi
     # factory._tag       = opt.tag
 
-    if not opt.submitBatch and not opt.haddRootFiles:
+    if not opt.submitBatch and not opt.haddRootFiles and not opt.checkBatch:
       factory.makeNominals()
 
     if opt.submitBatch :
@@ -968,6 +1282,13 @@ if __name__ == '__main__':
 
       print ("I have hadded all the root files but I have not removed the original ones")
       print ("I have performed an hadd of all the suitable root files in the folder ... ")
+
+
+    if opt.checkBatch :
+      print ("Checking if the jobs finished succesfully")
+      factory.checkBatch()
+
+
 
     print ("\n\n")
     print (" I'm done ... \n\n")
