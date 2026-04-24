@@ -364,7 +364,9 @@ class ShapeFactory:
             if categories :
               list_cuts[ cutName ] = "(" + expression + ")"   # add the un-categorized phase space too! it comes "for free"
               for category_name, category in categories.items():
-                list_cuts[ cutName + "_" + category_name] = "(" + expression + ") && (" + category + ")"
+                # list_cuts[ cutName + "_" + category_name] = "(" + expression + ") && (" + category + ")"
+                # this above is not needed, as handled by the branching of the nodes
+                list_cuts[ cutName + "_" + category_name] = "(" + category + ")"
             else :
               list_cuts[ cutName ] = expression
           else :
