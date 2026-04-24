@@ -1000,8 +1000,12 @@ int main() {{
         print ("=====================")
         print ("==== check Batch ====")
         print ("=====================")
+        print ("\n")
+
+        submission_dir = os.getcwd()
 
         list_jobs_with_error = []
+        list_missing_root_files = []
         #
         # Loop over samples
         #
@@ -1017,13 +1021,28 @@ int main() {{
                 line_count = sum(1 for line in f)
                 if line_count > 6: # should I remove the warnings to have 0? FIXME
                   list_jobs_with_error.append(name_err_file)
+              output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
+              root_file_name = f"{submission_dir}/{self._outputDir}/{output_root_file_name}"
+              if os.path.exists(root_file_name):
+                pass
+              else :
+                list_missing_root_files.append(root_file_name)
+
 
         if len(list_jobs_with_error) == 0:
           print (" No jobs with error ")
-        else:
+        else :
           print(" Jobs with errors:")
           for index, job in enumerate(list_jobs_with_error):
-            print(f"Job {index}: {job}")
+            print(f"    Job {index}: {job}")
+
+
+        if len(list_missing_root_files) == 0:
+          print (" All files are ready ")
+        else :
+          print(" Missing files:")
+          for index, job in enumerate(list_missing_root_files):
+            print(f"     File: {index}: {job}")
 
 
 
