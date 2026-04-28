@@ -104,7 +104,8 @@ class ShapeFactory:
 
     # _____________________________________________________________________________
     #                                                              "file_path" is a list of root files!
-    def create_cpp_source_list_of_files(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight, aliases_to_be_defined):
+    def create_cpp_source_list_of_files(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight,
+                                        aliases_to_be_defined, functions_to_be_defined):
         # This is your C++ template as a Python string
 
         define_input_files_logic = ""
@@ -179,6 +180,7 @@ class ShapeFactory:
         define_weights += f"//  weigths needed\n"
         define_weights += f'    varied_df = SafeDefine(varied_df, "my_sample_weight", "{weight}");\n'
 
+
         #
         # define the aliases needed for this specific sample
         #
@@ -188,6 +190,29 @@ class ShapeFactory:
         for aliasName, alias in aliases_to_be_defined.items():
           define_aliases += f'    varied_df = SafeDefine(varied_df, "{aliasName}", "{alias}");\n'
 
+
+        #
+        # define the aliases and functions needed for this specific sample
+        #
+        code_of_function_to_include = ""
+
+        define_aliases_functions = ""
+        define_aliases_functions += f"//  aliases of functions\n"
+
+        # not SafeDefine since these are new variables ... make it so!
+        for aliasName, alias in functions_to_be_defined.items():
+          with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
+            code_of_function_to_include += file.read()
+          code_of_function_to_include += "\n"
+
+          define_aliases_functions += "    varied_df = varied_df"
+          for i, var in enumerate(alias["variables"]):
+            define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
+          define_aliases_functions += ";\n"
+
+          new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
+          sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+          define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
 
 
         #
@@ -652,6 +677,15 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
 
 
 
+// --- Automatically generated: code to be added for additional functions ---
+
+{code_of_function_to_include}
+
+// ----------------------------------------
+
+
+
+
 int main() {{
     ROOT::EnableImplicitMT();
 
@@ -667,6 +701,12 @@ int main() {{
     // --- Automatically generated define aliases ---
 
     {define_aliases}
+
+    // ----------------------------------------
+
+    // --- Automatically generated define aliases for functions, no JIT ---
+
+    {define_aliases_functions}
 
     // ----------------------------------------
 
@@ -927,10 +967,13 @@ int main() {{
           # check if additional "Define" is needed, from "alises"
           #
           aliases_to_be_defined = {}
+          functions_to_be_defined = {}
           for aliasName, alias in self._aliases.items():
             if 'samples' in alias.keys():
-              if sampleName in alias['samples']:
+              if sampleName in alias['samples'] and 'expr' in alias.keys():
                 aliases_to_be_defined[aliasName] = alias['expr']
+              if sampleName in alias['samples'] and 'function' in alias.keys():
+                functions_to_be_defined[aliasName] = alias
 
 
           for subname, list_root_files in sample['name'].items():
@@ -964,7 +1007,8 @@ int main() {{
 
               output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
 
-              self.create_cpp_source_list_of_files(name_code, tree, root_files, output_root_file_name, sampleName, weight, aliases_to_be_defined)
+              self.create_cpp_source_list_of_files(name_code, tree, root_files, output_root_file_name, sampleName, weight,
+                                                   aliases_to_be_defined, functions_to_be_defined)
 
               list_of_files_to_compile.append(name_code)
               # self.compile_cpp(name_code)
@@ -1019,11 +1063,12 @@ int main() {{
             chunks_list_root_files = [list_root_files[i:i + make_job_every_N] for i in range(0, len(list_root_files), make_job_every_N)]
             for i, root_files in enumerate(chunks_list_root_files):
               name_err_file = self._script_batch_location + "/" + sampleName + "/" + subname + "/log/" + "my_script_" + str(i) + ".sh.err"
-              with open(name_err_file, 'r') as f:
-                line_count = sum(1 for line in f)
-                if line_count > 6: # should I remove the warnings to have 0? FIXME
-                  list_jobs_with_error.append(name_err_file)
-              output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
+              if os.path.exists(name_err_file):
+                with open(name_err_file, 'r') as f:
+                  line_count = sum(1 for line in f)
+                  if line_count > 6: # should I remove the warnings to have 0? FIXME
+                    list_jobs_with_error.append(name_err_file)
+                output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
               root_file_name = f"{submission_dir}/{self._outputDir}/{output_root_file_name}"
               if os.path.exists(root_file_name):
                 pass

@@ -82,8 +82,6 @@ class SnapshotFactory:
 
         self._treeName = 'latino'
 
-        self._outputDir = './test/'
-
         self._outputRootFile = 'myhistos.root'
 
         self._script_batch_location = './scripts_snapshot_batch/'
@@ -156,7 +154,9 @@ class SnapshotFactory:
 
     # _____________________________________________________________________________
     #                                                              "file_path" is a list of root files!
-    def create_cpp_source_list_of_files(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight, aliases_to_be_defined):
+    def create_cpp_source_list_of_files(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight,
+                                        aliases_to_be_defined, functions_to_be_defined):
+
         # This is your C++ template as a Python string
 
         define_input_files_logic = ""
@@ -187,6 +187,31 @@ class SnapshotFactory:
 
         for aliasName, alias in aliases_to_be_defined.items():
           define_aliases += f'    varied_df = SafeDefine(varied_df, "{aliasName}", "{alias}");\n'
+
+
+        #
+        # define the aliases and functions needed for this specific sample
+        #
+        code_of_function_to_include = ""
+
+        define_aliases_functions = ""
+        define_aliases_functions += f"//  aliases of functions\n"
+
+        # not SafeDefine since these are new variables ... make it so!
+        for aliasName, alias in functions_to_be_defined.items():
+          with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
+            code_of_function_to_include += file.read()
+          code_of_function_to_include += "\n"
+
+          define_aliases_functions += "    varied_df = varied_df"
+          for i, var in enumerate(alias["variables"]):
+            define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
+          define_aliases_functions += ";\n"
+
+          new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
+          sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+          define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
+
 
         booking_logic = ""
 
@@ -274,6 +299,16 @@ ROOT::RDF::RNode SafeDefine(ROOT::RDF::RNode df, std::string name, std::string e
 }}
 
 
+
+// --- Automatically generated: code to be added for additional functions ---
+
+{code_of_function_to_include}
+
+// ----------------------------------------
+
+
+
+
 int main() {{
     ROOT::EnableImplicitMT();
 
@@ -288,6 +323,14 @@ int main() {{
     {define_aliases}
 
     // ----------------------------------------
+
+
+    // --- Automatically generated define aliases for functions, no JIT ---
+
+    {define_aliases_functions}
+
+    // ----------------------------------------
+
 
     // --- Automatically generated define weights ---
 
@@ -311,6 +354,7 @@ int main() {{
     {define_variables_logic}
 
     // ----------------------------------------
+
 
     // --- Automatically generated: perform snapshot ---
 
@@ -430,10 +474,13 @@ int main() {{
           # check if additional "Define" is needed, from "alises"
           #
           aliases_to_be_defined = {}
+          functions_to_be_defined = {}
           for aliasName, alias in self._aliases.items():
             if 'samples' in alias.keys():
-              if sampleName in alias['samples']:
+              if sampleName in alias['samples'] and 'expr' in alias.keys():
                 aliases_to_be_defined[aliasName] = alias['expr']
+              if sampleName in alias['samples'] and 'function' in alias.keys():
+                functions_to_be_defined[aliasName] = alias
 
 
           for subname, list_root_files in sample['name'].items():
@@ -461,12 +508,12 @@ int main() {{
             chunks_list_root_files = [list_root_files[i:i + make_job_every_N] for i in range(0, len(list_root_files), make_job_every_N)]
 
             for i, root_files in enumerate(chunks_list_root_files):
-              name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_run_analysis_" + sampleName + "_" + subname + "_" + str(i)
+              name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_snapshot_" + sampleName + "_" + subname + "_" + str(i)
               tree = "Events"
 
-              output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
+              output_root_file_name = "nanoLatino_snapshot____" + sampleName + "_" + subname + "_" + str(i) + ".root"
 
-              self.create_cpp_source_list_of_files(name_code, tree, root_files, output_root_file_name, sampleName, weight, aliases_to_be_defined)
+              self.create_cpp_source_list_of_files(name_code, tree, root_files, output_root_file_name, sampleName, weight, aliases_to_be_defined, functions_to_be_defined)
 
               list_of_files_to_compile.append(name_code)
 
@@ -480,6 +527,7 @@ int main() {{
         #
         # subprocess.run() is a blocking call -> it will make the compilation to end before the next step
         #
+
 
 
 
@@ -506,12 +554,14 @@ int main() {{
             chunks_list_root_files = [list_root_files[i:i + make_job_every_N] for i in range(0, len(list_root_files), make_job_every_N)]
             for i, root_files in enumerate(chunks_list_root_files):
               name_err_file = self._script_batch_location + "/" + sampleName + "/" + subname + "/log/" + "my_script_" + str(i) + ".sh.err"
-              with open(name_err_file, 'r') as f:
-                line_count = sum(1 for line in f)
-                if line_count > 6: # should I remove the warnings to have 0? FIXME
-                  list_jobs_with_error.append(name_err_file)
-              output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
-              root_file_name = f"{submission_dir}/{self._outputDir}/{output_root_file_name}"
+              # print (" name_err_file = ", name_err_file)
+              if os.path.exists(name_err_file):
+                with open(name_err_file, 'r') as f:
+                  line_count = sum(1 for line in f)
+                  if line_count > 1: # should I remove the warnings to have 0? FIXME
+                    list_jobs_with_error.append(name_err_file)
+              output_root_file_name = "nanoLatino_snapshot____" + sampleName + "_" + subname + "_" + str(i) + ".root"
+              root_file_name = f"{self._folder_where_to_save_trees}/{output_root_file_name}"
               if os.path.exists(root_file_name):
                 pass
               else :
@@ -536,7 +586,105 @@ int main() {{
 
 
 
+    def submitBatch(self):
 
+        print ("======================")
+        print ("==== submit Batch ====")
+        print ("======================")
+
+        os.system ("mkdir " + self._script_batch_location + "/")
+
+        submission_dir = os.getcwd()
+
+        #
+        # Loop over samples
+        #
+        for sampleName, sample in self._samples.items():
+          os.system ("mkdir " + self._script_batch_location + "/" + sampleName + "/")
+
+          for subname, list_root_files in sample['name'].items():
+            os.system ("mkdir " + self._script_batch_location + "/" + sampleName + "/" + subname + "/")
+
+            make_job_every_N = 1
+            if "FilesPerJob" in sample.keys():
+              make_job_every_N = sample['FilesPerJob']
+            chunks_list_root_files = [list_root_files[i:i + make_job_every_N] for i in range(0, len(list_root_files), make_job_every_N)]
+
+            for i, root_files in enumerate(chunks_list_root_files):
+              name_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/" + "my_snapshot_" + sampleName + "_" + subname + "_" + str(i)
+              name_code_no_folder = "my_snapshot_" + sampleName + "_" + subname + "_" + str(i)
+              name_bash = self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sh"
+              output_root_file_name = "nanoLatino_snapshot____" + sampleName + "_" + subname + "_" + str(i) + ".root"
+
+              bash_code = f"""#!/bin/bash
+set -e  # Exit on error
+echo "Job started at $(date)"
+echo "Running on node $(hostname)"
+echo "Current full path before running the snapshot: $(pwd)"
+./{name_code_no_folder}
+echo "Current full path after running the snapshot: $(pwd)"
+mv {output_root_file_name}  {self._folder_where_to_save_trees}/
+echo "Current full path after moving the files: $(pwd)"
+echo "Current directory content after running:"
+ls -lh
+echo "Current full path: $(pwd)"
+
+"""
+
+#
+# mkdir {self._folder_where_to_save_trees}
+#
+
+              with open(f"{name_bash}", "w") as f:
+                f.write(bash_code)
+                os.system ("chmod +x " + name_bash)
+                # print ("name_bash = ", name_bash)
+
+              name_submit = submission_dir + "/" + self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sub"
+              # name_folder = submission_dir + "/" + self._script_batch_location + "/" + sampleName + "/" + subname + "/"
+              name_folder = self._script_batch_location + "/" + sampleName + "/" + subname + "/"
+              name_folder_code = self._scripts_run_folder + "/" + sampleName + "/" + subname + "/"
+              name_bash_no_folder = "my_script_" + str(i) + ".sh"
+
+              if self._silentMode :
+                output_file = "/dev/null"
+                error_file  = "/dev/null"
+                log_file    = "/dev/null"
+              else :
+                output_file = f"log/{name_bash_no_folder}.out"
+                error_file  = f"log/{name_bash_no_folder}.err"
+                log_file    = f"log/{name_bash_no_folder}.log"
+
+
+              submit_code = f"""
+initialdir            = {name_folder}
+executable            = {name_bash}
+transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder}
+should_transfer_files   = YES
+when_to_transfer_output = ON_EXIT
+output                = {output_file}
+error                 = {error_file}
+log                   = {log_file}
+getenv                = True
++JobFlavour           = "longlunch"
+queue
+"""
+
+              with open(f"{name_submit}", "w") as f:
+                f.write(submit_code)
+
+              print("Submitting job to HTCondor: condor_submit " + name_submit)
+              subprocess.run(["condor_submit", f"{name_submit}"])
+
+
+
+
+
+#
+#
+#  Main
+#
+#
 
 if __name__ == '__main__':
     sys.argv = argv
@@ -675,8 +823,7 @@ if __name__ == '__main__':
       factory.makeScripts()
 
     if opt.submitBatch :
-      # factory.submitBatch()
-      pass
+      factory.submitBatch()
 
     if opt.checkBatch :
       print ("Checking if the jobs finished succesfully")
