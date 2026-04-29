@@ -1087,7 +1087,7 @@ int main() {{
                   line_count = sum(1 for line in f)
                   if line_count > 6: # should I remove the warnings to have 0? FIXME
                     list_jobs_with_error.append(name_err_file)
-                output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
+              output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
               root_file_name = f"{submission_dir}/{self._outputDir}/{output_root_file_name}"
               if os.path.exists(root_file_name):
                 pass
