@@ -24,3 +24,4 @@ echo "Location: ${FRAMEWORK_PATH}"
 echo "------------------------------------------------"
 
 
+source /cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/setup.sh

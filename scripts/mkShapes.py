@@ -201,18 +201,42 @@ class ShapeFactory:
 
         # not SafeDefine since these are new variables ... make it so!
         for aliasName, alias in functions_to_be_defined.items():
-          with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
-            code_of_function_to_include += file.read()
+          if 'external' in alias.keys():
+            with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
+              code_of_function_to_include += file.read()
           code_of_function_to_include += "\n"
 
           define_aliases_functions += "    varied_df = varied_df"
-          for i, var in enumerate(alias["variables"]):
-            define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
+
+          if 'xmlfile' not in alias.keys(): # if "xmlfile" is present, it's a TMVA and it requires casting to float
+            for i, var in enumerate(alias["variables"]):
+              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
+          else:  # if "xmlfile" is present, it's a TMVA and it requires casting to float
+            for i, var in enumerate(alias["variables"]):
+              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}_f", "(float){var}")'
+
           define_aliases_functions += ";\n"
 
-          new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
-          sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
-          define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
+          # if a simple c++ function
+          if 'xmlfile' not in alias.keys():
+            define_aliases_functions += f'\n'
+            new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
+            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+            define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
+            define_aliases_functions += f'\n'
+          # if "xmlfile" is present, it's a TMVA
+          elif 'xmlfile' in alias.keys():
+            define_aliases_functions += f'\n'
+            submission_dir = os.getcwd()
+            define_aliases_functions += f'''    TMVA::Experimental::RReader my_model_{aliasName}("{submission_dir}/{alias['xmlfile']}");\n'''
+
+            new_names = [f"_var_{aliasName}_{i}_f" for i in range(len(alias["variables"]))]
+            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+
+            define_aliases_functions += f'''    varied_df = varied_df.Define("{aliasName}",
+                     TMVA::Experimental::Compute<{len(alias['variables'])}, float>(my_model_{aliasName}),
+                     {sintax_variables});\n'''
+            define_aliases_functions += f'\n'
 
 
         #
@@ -306,16 +330,6 @@ class ShapeFactory:
                 register_variations_logic += f'''      "{nuisance['name']}"\n'''
                 register_variations_logic += f'''      );\n'''
 
-
-
-              # register_variations_logic += f'''    std::string expression_{nuisanceName} = "ROOT::RVecD{{{nuisance['samples'][sampleName][1]},{nuisance['samples'][sampleName][2]}}}";\n'''
-              # register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
-              # register_variations_logic += f'''                              "{nuisance['samples'][sampleName][0]}",\n'''
-              # register_variations_logic += f'''                              expression_{nuisanceName},\n'''
-              # register_variations_logic += f'''                              {{"up", "down"}}\n'''
-              # register_variations_logic += f'''                              );\n'''
-              #
-              #
         booking_logic = ""
 
         #
@@ -658,6 +672,11 @@ TH1D* UnrollHistogram(TH2D* h2) {{
 
 
 
+#include "TMVA/RReader.hxx"
+#include "TMVA/RInferenceUtils.hxx"
+
+
+
 ROOT::RDF::RNode SafeDefine(ROOT::RDF::RNode df, std::string name, std::string expr) {{
     auto colNames = df.GetColumnNames();
     if (std::find(colNames.begin(), colNames.end(), name) == colNames.end()) {{
@@ -870,7 +889,7 @@ int main() {{
     def generate_makefile(self, file_paths, makefile_name="Makefile"):
         # Get ROOT configuration via shell calls
         cpp_flags = "$(shell root-config --cflags)"
-        ld_flags = "$(shell root-config --libs)"
+        ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
         type_of_compilation = "-O2"
         # from "blabla.cpp" to "blabla"
         targets = [os.path.splitext(f)[0] for f in file_paths]
@@ -1192,10 +1211,10 @@ if __name__ == '__main__':
     header = """
          --------------------------------------------------------------------------------------------------
          '                                                                                                '
-         '                ___|   |                               \  |         |                           '
-         '              \___ \   __ \    _` |  __ \    _ \      |\/ |   _` |  |  /   _ \   __|            '
+         '                ___|   |                               \\  |         |                           '
+         '              \\___ \\   __ \\    _` |  __ \\    _ \\      |\\/ |   _` |  |  /   _ \\   __|            '
          '                    |  | | |  (   |  |   |   __/      |   |  (   |    <    __/  |               '
-         '              _____/  _| |_| \__,_|  .__/  \___|     _|  _| \__,_| _|\_\ \___| _|               '
+         '              _____/  _| |_| \\__,_|  .__/  \\___|     _|  _| \\__,_| _|\\_\\ \\___| _|               '
          '                                    _|                                                          '
          '                                                                                                '
          --------------------------------------------------------------------------------------------------

@@ -199,18 +199,43 @@ class SnapshotFactory:
 
         # not SafeDefine since these are new variables ... make it so!
         for aliasName, alias in functions_to_be_defined.items():
-          with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
-            code_of_function_to_include += file.read()
+          if 'external' in alias.keys():
+            with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
+              code_of_function_to_include += file.read()
           code_of_function_to_include += "\n"
 
           define_aliases_functions += "    varied_df = varied_df"
-          for i, var in enumerate(alias["variables"]):
-            define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
+
+          if 'xmlfile' not in alias.keys(): # if "xmlfile" is present, it's a TMVA and it requires casting to float
+            for i, var in enumerate(alias["variables"]):
+              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
+          # if "xmlfile" is present, it's a TMVA
+          elif 'xmlfile' in alias.keys():
+            for i, var in enumerate(alias["variables"]):
+              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}_f", "(float){var}")'
+
           define_aliases_functions += ";\n"
 
-          new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
-          sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
-          define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
+          # if a simple c++ function
+          if 'xmlfile' not in alias.keys():
+            define_aliases_functions += f'\n'
+            new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
+            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+            define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
+            define_aliases_functions += f'\n'
+          # if "xmlfile" is present, it's a TMVA
+          elif 'xmlfile' in alias.keys():
+            define_aliases_functions += f'\n'
+            submission_dir = os.getcwd()
+            define_aliases_functions += f'''    TMVA::Experimental::RReader my_model_{aliasName}("{submission_dir}/{alias['xmlfile']}");\n'''
+
+            new_names = [f"_var_{aliasName}_{i}_f" for i in range(len(alias["variables"]))]
+            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+
+            define_aliases_functions += f'''    varied_df = varied_df.Define("{aliasName}",
+                     TMVA::Experimental::Compute<{len(alias['variables'])}, float>(my_model_{aliasName}),
+                     {sintax_variables});\n'''
+            define_aliases_functions += f'\n'
 
 
         booking_logic = ""
@@ -239,7 +264,6 @@ class SnapshotFactory:
             name = variable['name']
             define_variables_logic += f'    current_node = SafeDefine(current_node, "{variableName}", "{name}");\n'
 
-
         #
         # if "supercut" is defined, use it to speed up
         #
@@ -257,7 +281,9 @@ class SnapshotFactory:
           this_cutName = self._cut_to_dump
           this_cut = self._cuts[self._cut_to_dump]
 
+          define_variables_logic += f'\n'
           define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
+          define_variables_logic += f'\n'
 
           # save only the columns that exist, e.g. if data there is no "promptgenmatched"
           columns_str = ", ".join([f'"{v}"' for v in self._variables_to_dump])
@@ -269,6 +295,7 @@ class SnapshotFactory:
           define_variables_logic += f'        columns_to_save.push_back(col);                                           \n'
           define_variables_logic += f'      }}                                                                          \n'
           define_variables_logic += f'    }}                                                                            \n'
+          define_variables_logic += f'\n'
 
           define_snapshot_logic += f'node_{this_cutName}.Snapshot("Events", "{output_root_file_name}", columns_to_save);   \n'
 
@@ -288,6 +315,10 @@ class SnapshotFactory:
 #include <iostream>
 #include <string>
 #include <typeinfo>
+
+
+#include "TMVA/RReader.hxx"
+#include "TMVA/RInferenceUtils.hxx"
 
 
 ROOT::RDF::RNode SafeDefine(ROOT::RDF::RNode df, std::string name, std::string expr) {{
@@ -377,7 +408,7 @@ int main() {{
     def generate_makefile(self, file_paths, makefile_name):
         # Get ROOT configuration via shell calls
         cpp_flags = "$(shell root-config --cflags)"
-        ld_flags = "$(shell root-config --libs)"
+        ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
         type_of_compilation = "-O2"
         # from "blabla.cpp" to "blabla"
         targets = [os.path.splitext(f)[0] for f in file_paths]
@@ -513,7 +544,8 @@ int main() {{
 
               output_root_file_name = "nanoLatino_snapshot____" + sampleName + "_" + subname + "_" + str(i) + ".root"
 
-              self.create_cpp_source_list_of_files(name_code, tree, root_files, output_root_file_name, sampleName, weight, aliases_to_be_defined, functions_to_be_defined)
+              self.create_cpp_source_list_of_files(name_code, tree, root_files, output_root_file_name, sampleName, weight,
+                                                   aliases_to_be_defined, functions_to_be_defined)
 
               list_of_files_to_compile.append(name_code)
 
@@ -692,10 +724,10 @@ if __name__ == '__main__':
     header = """
          --------------------------------------------------------------------------------------------------
          '                                                                                                '
-         '      ___|                              |             |         \  |         |                  '
-         '    \___ \   __ \    _` |  __ \    __|  __ \    _ \   __|      |\/ |   _` |  |  /   _ \   __|   '
-         '          |  |   |  (   |  |   | \__ \  | | |  (   |  |        |   |  (   |    <    __/  |      '
-         '    _____/  _|  _| \__,_|  .__/  ____/ _| |_| \___/  \__|     _|  _| \__,_| _|\_\ \___| _|      '
+         '      ___|                              |             |         \\  |         |                  '
+         '    \\___ \\   __ \\    _` |  __ \\    __|  __ \\    _ \\   __|      |\\/ |   _` |  |  /   _ \\   __|   '
+         '          |  |   |  (   |  |   | \\__ \\  | | |  (   |  |        |   |  (   |    <    __/  |      '
+         '    _____/  _|  _| \\__,_|  .__/  ____/ _| |_| \\___/  \\__|     _|  _| \\__,_| _|\\_\\ \\___| _|      '
          '                          _|                                                                    '
          '                                                                                                '
          --------------------------------------------------------------------------------------------------
