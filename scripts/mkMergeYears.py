@@ -7,6 +7,7 @@ sys.argv = argv[:1]
 import argparse
 
 import os
+import re
 
 import ROOT
 
@@ -60,28 +61,10 @@ def loadDefaultOptions(parser, pycfg=None, quiet=False):
 
 
 class MergerFactory:
-    # _logger = logging.getLogger('MergerFactory')
 
     # _____________________________________________________________________________
     def __init__(self):
         self._fileIn = None
-
-    # _____________________________________________________________________________
-
-    def extract_dict(self, filename, var_name, samples_input = {}):
-
-        namespace = {
-          'samples': samples_input
-        }
-
-        try:
-            with open(filename, 'r') as f:
-                # We use an empty dict for globals to isolate the output
-                exec(f.read(), namespace, namespace)
-            return namespace.get(var_name)
-        except Exception as e:
-            print(f"Error reading {filename}: {e}")
-            return None
 
     # _____________________________________________________________________________
     def merge(
@@ -92,8 +75,9 @@ class MergerFactory:
         samples,
         nuisances,
         foldersToMerge,
-        foldersToMergeNuisancesFiles,
+        foldersToMergeNuisancesFiles
     ):
+
 
        #
        # expand cuts, unrolling the categories
@@ -137,9 +121,33 @@ class MergerFactory:
 
        for folderHR, year_nuisances in foldersToMergeNuisancesFiles.items() :
          year_samples = foldersToMergeSamplesFiles[folderHR]
-         temp_samples = self.extract_dict(year_samples, "samples")
-         nuisances = self.extract_dict(year_nuisances, "nuisances", temp_samples)
+
+         #
+         # read list of samples
+         #
+         samples = {}
+         if os.path.exists(opt.samplesFile) :
+           handle = open(opt.samplesFile,'r')
+           exec(handle.read())
+           handle.close()
+           # clean the dictionary to remove globals due to "exec" funcionality
+           samples = {k: v for k, v in samples.items() if not (k.startswith('__') and k.endswith('__'))}
+         temp_samples = samples
+
+         #
+         # read list of nuisances
+         #
+         nuisances = {}
+         if os.path.exists(opt.nuisancesFile) :
+           handle = open(opt.nuisancesFile,'r')
+           exec(handle.read())
+           handle.close()
+           # clean the dictionary to remove globals due to "exec" funcionality
+           nuisances = {k: v for k, v in nuisances.items() if not (k.startswith('__') and k.endswith('__'))}
+
          all_nuisances[folderHR] = nuisances
+
+         print (" all_nuisances[", folderHR, "] = ", all_nuisances[folderHR])
 
 
        #
@@ -155,8 +163,8 @@ class MergerFactory:
          # copy the default root file for bookkeeping
 
          # root_file_joined.root FIXME
-         old_root_file_name = folder["folder"] + "/" + "rootFiles" + "/root_file_joined"
-         # old_root_file_name = folder["folder"] + "/" + "rootFiles" + "/mkShapes__" + folder["tag"] + ".root"
+         old_root_file_name = folder["folder"] + "/" + "rootFile" + "/root_file_joined.root"
+         # old_root_file_name = folder["folder"] + "/" + "rootFile" + "/mkShapes__" + folder["tag"] + ".root"
          new_root_file_name = "year_" + folderHR + "_histos_" + folder["tag"] + ".root"
          os.system ("cp " + old_root_file_name + "   " + new_root_file_name )
          rootFile    = ROOT.TFile.Open( new_root_file_name, "READ")
@@ -453,14 +461,11 @@ if __name__ == '__main__':
        samples,
        nuisances,
        opt.foldersToMerge,
-       foldersToMergeNuisancesFiles
+       foldersToMergeNuisancesFiles,
        )
 
 
     print ("\n\n")
     print (" I'm done ... \n\n")
-
-
-
 
 
