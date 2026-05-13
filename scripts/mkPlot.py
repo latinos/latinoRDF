@@ -1391,7 +1391,7 @@ class PlotFactory:
             else:
                 # Grab unit from x axis title -- capture part in () or [] brackets
                 xaxistitle = frameDistro.GetXaxis().GetTitle()
-                unitpattern = '(?:\[|\()(\w+)(?:\]|\))'
+                unitpattern = '(?:\\[|\\()(\\w+)(?:\\]|\\))'
                 unitsearch = re.search(unitpattern,xaxistitle)
                 unit = 'unit' if unitsearch is None else unitsearch.group(1)
 
@@ -2942,10 +2942,10 @@ if __name__ == '__main__':
     header = """
          --------------------------------------------------------------------------------
          '                                                                              '
-         '            _ \   |         |         \  |         |                          '
-         '           |   |  |   _ \   __|      |\/ |   _` |  |  /   _ \   __|           '
+         '            _ \\   |         |         \\  |         |                          '
+         '           |   |  |   _ \\   __|      |\\/ |   _` |  |  /   _ \\   __|           '
          '           ___/   |  (   |  |        |   |  (   |    <    __/  |              '
-         '          _|     _| \___/  \__|     _|  _| \__,_| _|\_\ \___| _|              '
+         '          _|     _| \\___/  \\__|     _|  _| \\__,_| _|\\_\\ \\___| _|              '
          '                                                                              '
          '                                                                              '
          --------------------------------------------------------------------------------
@@ -2959,6 +2959,8 @@ if __name__ == '__main__':
     parser.add_argument("--silentMode",  action='store_true', dest="silentMode",    help="Remove as much as possible the print and the log/err files production")
     #
     #
+    #
+    parser.add_argument('--inputFile'      , dest='inputFile'    , help='scale of maxY to maxHistoY'                 , default="root_file_joined.root")
     #
     parser.add_argument('--scaleToPlot'    , dest='scaleToPlot'    , help='scale of maxY to maxHistoY'                 , default=3.0  ,    type=float   )
     parser.add_argument('--minLogC'        , dest='minLogC'        , help='min Y in log plots'                         , default=0.01  ,    type=float   )
@@ -3019,6 +3021,7 @@ if __name__ == '__main__':
     print ("opt.nuisancesFile    = ", opt.nuisancesFile)
     print ("opt.lumi             = ", opt.lumi)
     print ("opt.outputDir        = ", opt.outputDir)
+    print ("opt.inputFile        = ", opt.inputFile)
 
     print ("opt.submitBatch      = ", opt.submitBatch)
     print ("opt.silentMode       = ", opt.silentMode)
@@ -3117,9 +3120,10 @@ if __name__ == '__main__':
 
     #
     # the format is defined in mkShaper.py
-    # FIXME: add it as configurable ...
     #
-    inputFile = opt.outputDir +"/root_file_joined.root"
+
+    inputFile = opt.outputDir + "/" + opt.inputFile
+    # inputFile = opt.outputDir +"/root_file_joined.root"
     # inputFile = "." +"/root_file_joined.root"
 
 
