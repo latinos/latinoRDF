@@ -103,530 +103,34 @@ class ShapeFactory:
 
 
     # _____________________________________________________________________________
-    #                                                              "file_path" is a list of root files!
-    def create_cpp_source_list_of_files(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight,
-                                        aliases_to_be_defined, functions_to_be_defined,
-                                        subsamples):
+    #
+    def create_library_cpp(self):
 
-        # This is your C++ template as a Python string
 
-        define_input_files_logic = ""
+        cpp_code_library_header = f"""
 
-        define_input_files_logic += f"//  Nominal input files\n"
+#ifndef LIBRARY_UTILS_H
+#define LIBRARY_UTILS_H
 
-        define_input_files_logic += f'    auto* nominal = new TChain("{tree_name}");\n'
-
-        # define_input_files_logic += f'    nominal->Add("{file_path}");\n'
-
-        for file_name in file_path:
-          define_input_files_logic += f'    nominal->Add("{file_name}");\n'
-
-        define_input_files_logic += f'    \n'
-        define_input_files_logic += f'    auto nominalBranches = getBranchNames(nominal);\n'
-        define_input_files_logic += f'    \n'
-
-        #
-        # now define the nuisances based on alternative trees
-        #
-        # 'kind': 'suffix',
-        # 'type': 'shape',
-        #
-        # 'mapUp': 'ElepTup',
-        # 'mapDown': 'ElepTdo',
-        #
-        #      'folderUp'    :   '/eos/cms/store/group/phys_higgs/cmshww/amassiro/HWWNano/Summer20UL18_106x_nAODv9_Full2018v9/MCl1loose2018v9__MCCorr2018v9NoJERInHorn__l2tightOR2018v9__ElepTup_suffix'
-        #      'folderDown'   : ...
-        #
-        #
-
-        #
-        # extract name of root file nominal, without folder path
-        #
-
-
-        define_input_files_logic += f"//  Variations input files (if any)\n"
-
-        for nuisanceName, nuisance in self._nuisances.items():
-
-          if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
-
-            # One TChain up and one TChain down, then add all the root files
-            define_input_files_logic += f'''    auto* friend_{nuisance['mapUp']} = new TChain("{tree_name}");\n'''
-            define_input_files_logic += f'''    auto* friend_{nuisance['mapDown']} = new TChain("{tree_name}");\n'''
-
-            for file_name in file_path:
-
-              # Find the index of the first "/" from the right
-              index = file_name.rfind("/")
-              # Extract everything from that index + 1 to the end
-              # (We add 1 so we don't include the "/" itself)
-              file_path_only_file_no_folder = file_name[index + 1:]
-
-              define_input_files_logic += f'''    friend_{nuisance['mapUp']}->Add("{nuisance['folderUp']}/{file_path_only_file_no_folder}");\n'''
-              define_input_files_logic += f'''    friend_{nuisance['mapDown']}->Add("{nuisance['folderDown']}/{file_path_only_file_no_folder}");\n'''
-
-            # add friend TChain only once
-            define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapUp']}, "{nuisance['mapUp']}");\n'''
-            define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapDown']}, "{nuisance['mapDown']}");\n'''
-
-            # varied branches are the same for all "added" trees
-            define_input_files_logic += f'''    auto varBranches_{nuisance['mapUp']} = getBranchNames(friend_{nuisance['mapUp']});\n'''
-            define_input_files_logic += f'''    auto varBranches_{nuisance['mapDown']} = getBranchNames(friend_{nuisance['mapDown']});\n'''
-
-
-        define_input_files_logic += f'    ROOT::RDataFrame base_df(*nominal);\n'
-        # define_input_files_logic += f'    ROOT::RDF::RInterface varied_df = base_df;\n'
-        define_input_files_logic += f'    auto varied_df = ROOT::RDF::RNode(base_df);\n'
-
-
-        #
-        # define the weights needed for this specific sample
-        #
-        define_weights = ""
-        define_weights += f"//  weigths needed\n"
-        define_weights += f'    varied_df = SafeDefine(varied_df, "my_sample_weight", "{weight}");\n'
-
-
-        #
-        # define the aliases needed for this specific sample
-        #
-        define_aliases = ""
-        define_aliases += f"//  aliases/define needed\n"
-
-        for aliasName, alias in aliases_to_be_defined.items():
-          define_aliases += f'    varied_df = SafeDefine(varied_df, "{aliasName}", "{alias}");\n'
-
-
-        #
-        # define the aliases and functions needed for this specific sample
-        #
-        code_of_function_to_include = ""
-
-        define_aliases_functions = ""
-        define_aliases_functions += f"//  aliases of functions\n"
-
-        # not SafeDefine since these are new variables ... make it so!
-        for aliasName, alias in functions_to_be_defined.items():
-          if 'external' in alias.keys():
-            with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
-              code_of_function_to_include += file.read()
-          code_of_function_to_include += "\n"
-
-          define_aliases_functions += "    varied_df = varied_df"
-
-          if 'xmlfile' not in alias.keys(): # if "xmlfile" is present, it's a TMVA and it requires casting to float
-            for i, var in enumerate(alias["variables"]):
-              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
-          else:  # if "xmlfile" is present, it's a TMVA and it requires casting to float
-            for i, var in enumerate(alias["variables"]):
-              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}_f", "(float){var}")'
-
-          define_aliases_functions += ";\n"
-
-          # if a simple c++ function
-          if 'xmlfile' not in alias.keys():
-            define_aliases_functions += f'\n'
-            new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
-            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
-            define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
-            define_aliases_functions += f'\n'
-          # if "xmlfile" is present, it's a TMVA
-          elif 'xmlfile' in alias.keys():
-            define_aliases_functions += f'\n'
-            submission_dir = os.getcwd()
-            define_aliases_functions += f'''    TMVA::Experimental::RReader my_model_{aliasName}("{submission_dir}/{alias['xmlfile']}");\n'''
-
-            new_names = [f"_var_{aliasName}_{i}_f" for i in range(len(alias["variables"]))]
-            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
-
-            define_aliases_functions += f'''    varied_df = varied_df.Define("{aliasName}",
-                     TMVA::Experimental::Compute<{len(alias['variables'])}, float>(my_model_{aliasName}),
-                     {sintax_variables});\n'''
-            define_aliases_functions += f'\n'
-
-
-        #
-        # register the variations
-        #
-
-        register_variations_logic = ""
-
-        register_variations_logic += f"//  Register the variations\n"
-
-        if len(self._nuisances) != 0 :
-          first_time_suffix = 0
-          for nuisanceName, nuisance in self._nuisances.items():
-
-            #
-            # "shape" : "suffix" nuisances
-            #  a.k.a. alternative friend trees
-            #  also the use of a different weight is possible, to be activated with "weigthsPerSample"    FIXME  Not yet implemented ... was this ever used?
-            #         NB: suffix AND weight at the same time is yet NOT implemented (is it possible with RDataFrame?) FIXME
-            #
-            #  e.g.
-            #    'mapUp': 'ElepTup',
-            #    'mapDown': 'ElepTdo',
-            #    'samples': dict((skey, ['1', '1']) for skey in mcALL),
-            #    'folderUp': makeMCDirectory('ElepTup_suffix'),
-            #    'folderDown': makeMCDirectory('ElepTdo_suffix'),
-            #    'weigthsPerSample': true
-            #
-            #
-            if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
-
-              if first_time_suffix == 0 :
-                register_variations_logic += f'    int suffix_size = 0;\n'
-                first_time_suffix = 1
-
-              register_variations_logic += f'''    suffix_size = {len(nuisance['mapUp']) + 1};\n'''
-              register_variations_logic += f'''    for (const auto& branch : varBranches_{nuisance['mapUp']}) {{\n'''
-              register_variations_logic += f'''      if (int(branch.size()) >= (suffix_size-1) && branch.compare(branch.size() - (suffix_size-1), (suffix_size-1), "{nuisance['mapUp']}") == 0 ) {{\n'''
-              register_variations_logic += f'''        std::string nomCol = branch.substr(0, branch.size() - suffix_size);\n'''
-              #
-              # check if the varied column exists also in the nominal ttree
-              # If it does not exist, skip. But ... how is it possible you have the varied value but not the nominal one? How did you produce the varied variable?
-              #
-              register_variations_logic += f'''        if (std::find(nominalBranches.begin(), nominalBranches.end(), nomCol) != nominalBranches.end()) {{\n'''
-              register_variations_logic += f'''          std::string expression = "ROOT::RVec<" + varied_df.GetColumnType(nomCol) + ">{{static_cast<" + varied_df.GetColumnType(nomCol) + ">(" + branch + ")}}";\n'''
-              #
-              # why do I have long float vs float between the nominal and the varied variable?
-              # FIXME: some fix might be needed in the post-processing step --> removing the (technically not-needed) casting might make this code faster
-              #
-              register_variations_logic += f'''          varied_df = varied_df.Vary(\n'''
-              register_variations_logic += f'''                                    nomCol,\n'''
-              register_variations_logic += f'''                                    expression,\n'''
-              register_variations_logic += f'''                                    {{"up"}},\n'''
-              register_variations_logic += f'''                                    "{nuisance['name']}"\n'''
-              register_variations_logic += f'''                                    );\n'''
-              register_variations_logic += f'''        }};\n'''
-              register_variations_logic += f'''      }};\n'''
-              register_variations_logic += f'''    }};\n'''
-
-              register_variations_logic += f'''    \n'''
-              register_variations_logic += f'''    suffix_size = {len(nuisance['mapDown']) + 1};\n'''
-              register_variations_logic += f'''    for (const auto& branch : varBranches_{nuisance['mapDown']}) {{\n'''
-              register_variations_logic += f'''      if (int(branch.size()) >= (suffix_size-1) && branch.compare(branch.size() - (suffix_size-1), (suffix_size-1), "{nuisance['mapDown']}") == 0 ) {{\n'''
-              register_variations_logic += f'''        std::string nomCol = branch.substr(0, branch.size() - suffix_size);\n'''
-              register_variations_logic += f'''        if (std::find(nominalBranches.begin(), nominalBranches.end(), nomCol) != nominalBranches.end()) {{\n'''
-              register_variations_logic += f'''          std::string expression = "ROOT::RVec<" + varied_df.GetColumnType(nomCol) + ">{{static_cast<" + varied_df.GetColumnType(nomCol) + ">(" + branch + ")}}";\n'''
-              register_variations_logic += f'''          varied_df = varied_df.Vary(\n'''
-              register_variations_logic += f'''                                    nomCol,\n'''
-              register_variations_logic += f'''                                    expression,\n'''
-              register_variations_logic += f'''                                    {{"do"}},\n'''
-              register_variations_logic += f'''                                    "{nuisance['name']}"\n'''
-              register_variations_logic += f'''                                    );\n'''
-              register_variations_logic += f'''        }};\n'''
-              register_variations_logic += f'''      }};\n'''
-              register_variations_logic += f'''    }};\n'''
-
-            #
-            # "shape" : "weight" nuisances
-            #  a.k.a. same tree but with a different weight
-            #
-            #  e.g. nominal,         up,                      down
-            #    ['SFweightMu', 'SFweightMuUp',         'SFweightMuDown']
-            #    ['LepWPSF',    'LepWPSF*SFweightMuUp', 'LepWPSF*SFweightMuDown']
-            #  or
-            #         up,             down
-            #    ['SFweightMuUp', 'SFweightMuDown']
-            #     --> in this second definition the system assumes this is a multiplicative effect, namely the nominal is a "1."
-            #         and it's always applied, since there is no check that the "nominal" exists
-            #         while above the system first checks that the nominal exists before applying the variation
-            #
-            #
-            if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'weight'):
-
-              if len(nuisance['samples'][sampleName]) == 3:
-                #
-                # check if '{nuisance['samples'][sampleName][0]}' is in the string 'weight' (that is actually defined in 'my_sample_weight')
-                # if yes, propagate the weight variation
-
-                if nuisance['samples'][sampleName][0] in weight:
-
-                  variation_up   =  weight.replace(nuisance['samples'][sampleName][0], nuisance['samples'][sampleName][1])
-                  variation_down =  weight.replace(nuisance['samples'][sampleName][0], nuisance['samples'][sampleName][2])
-
-                  register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
-                  register_variations_logic += f'''      "my_sample_weight",\n'''
-                  register_variations_logic += f'''      "ROOT::RVecD{{{variation_up},{variation_down}}}",\n'''
-                  register_variations_logic += f'''      {{"up", "do"}},\n'''
-                  register_variations_logic += f'''      "{nuisance['name']}"\n'''
-                  register_variations_logic += f'''      );\n'''
-
-              else :
-
-                  variation_up     =  f"({weight}) * {nuisance['samples'][sampleName][0]}"
-                  variation_down   =  f"({weight}) * {nuisance['samples'][sampleName][1]}"
-
-                  register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
-                  register_variations_logic += f'''      "my_sample_weight",\n'''
-                  register_variations_logic += f'''      "ROOT::RVecD{{{variation_up},{variation_down}}}",\n'''
-                  register_variations_logic += f'''      {{"up", "do"}},\n'''
-                  register_variations_logic += f'''      "{nuisance['name']}"\n'''
-                  register_variations_logic += f'''      );\n'''
-
-
-        booking_logic = ""
-
-        #
-        # In RDataFrame, all variables must be defined before being plotted
-        # The pro of this is that they can be used also in cuts
-        #
-        #
-        # In case of already defined variables, for example "mll", and "mll" is already defined in the TTree,
-        # the code "SafeDefine" should handle this, and "Define" a variable only when needed
-        #
-
-        booking_logic += f"//  Initial ...\n"
-        booking_logic += f'    auto current_node = ROOT::RDF::RNode(varied_df);\n'
-
-
-        define_variables_logic = ""
-        define_variables_logic += f"//  I need to define the RNode, otherwise SafeDefine will not work\n"
-        define_variables_logic += f"    // Define variables \n"
-        for variableName, variable in self._variables.items():
-          if 'is2d' in variable.keys() and variable['is2d'] == 1:
-            pass
-          else:
-            # only for 1D variables
-            name = variable['name']
-            define_variables_logic += f'    current_node = SafeDefine(current_node, "{variableName}", "{name}");\n'
-
-
-
-        #
-        # if "supercut" is defined, use it to speed up
-        #
-        if self._supercut != '' :
-          define_variables_logic += f'    current_node = current_node.Filter("{self._supercut}", "supercut");\n'
-
-
-
-        #
-        # once all variables are defined, they can be used and plotted with "variableName"
-        #
-        # In root file:    <cut>/<variable>/histo_<sample>
-        #
-        for cutName, cut in self._cuts.items():
-          #
-          # cuts could be nested, i.e. cut -> categories
-          # here is where you exploit the full power of RDataFrame
-          #
-          # Procedure:
-          # - check if categories
-          # - if yes, then define the cuts in a nested way
-          # - otherwise if "expr" is defined use it
-          #   if note use directly "cut"
-          #
-          # Different possibilities:
-          #
-          # cut["DY"] = "mll>50 && mll<120"
-          # cut["DY"] = {   'expr': 'mll>70 && mll<110' }
-          # cut["DY"] = {
-          #    'expr': 'mll>70 && mll<110',
-          #    'categories' : {
-          #       'eleele' : 'ee',   # "ee" is defined in aliases.py
-          #       'mumu'   : 'mm',   # "mm" is defined in aliases.py
-          #      }
-          #    }
-          #
-
-          list_cuts = {}
-          if isinstance(cut, dict):
-            # "cut" is a dictionary
-            expression = cut['expr']
-            categories = cut.get('categories', {})
-            if categories :
-              list_cuts[ cutName ] = "(" + expression + ")"   # add the un-categorized phase space too! it comes "for free"
-              for category_name, category in categories.items():
-                # list_cuts[ cutName + "_" + category_name] = "(" + expression + ") && (" + category + ")"
-                # this above is not needed, as handled by the branching of the nodes
-                list_cuts[ cutName + "_" + category_name] = "(" + category + ")"
-            else :
-              list_cuts[ cutName ] = expression
-          else :
-            list_cuts[ cutName ] = cut
-
-
-          mother_cut_name = ""
-          for icut, (this_cutName, this_cut) in enumerate(list_cuts.items()):
-            if len(list_cuts) > 1 :
-              if icut == 0:
-                define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
-                mother_cut_name = this_cutName
-              else:
-                # with this I'm nesting the node into the "mother node" -> it's RDataFrame power
-                define_variables_logic += f'    auto node_{this_cutName} = node_{mother_cut_name}.Filter("{this_cut}", "{this_cutName}");\n'
-            else :
-              define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
-
-            #
-            # if subsamples are defined for this specific sample
-            #
-            #
-            #    'subsamples': {
-            #      #         definition     specific weight
-            #      'Low' : {'mll<40',      '1.34'},
-            #      'High': {'mll>40',      '0.90'}
-            #    }
-            #
-            #
-            # define the "cuts" nodes for the subsamples
-            #
-            if subsamples :
-              for sub_name, sub_cut_name in subsamples.items():
-                define_variables_logic += f'    auto node_{this_cutName}_{sampleName}_{sub_name} = node_{this_cutName}.Filter("{sub_cut_name[0]}", "cut_{sampleName}_{sub_name}");\n'
-
-
-        # # Write C++ code to create a specific node for this sub_name
-        # cpp_file.write(f'auto df_{sub_name} = df_base.Filter("{sub_cut}");\n')
-        #
-        # # If the subsample has a specific weight:
-        # sub_weight = subsample_weights.get(sub_name, "1.0")
-        # cpp_file.write(f'auto df_{sub_name}_final = df_{sub_name}.Define("total_weight", "{sub_weight}");\n')
-
-
-
-            for variableName, variable in self._variables.items():
-                #  Different options for range definition:
-                #
-                #  1D histograms:
-                #     'range' : (200,10,500),
-                #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200]),
-                #
-                #  2D histograms:
-                #     'range' : (5, 0.0, 1.0, 10,  0., 10000.),
-                #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200],[60, 95, 110, 135, 200],),
-                #
-
-                variable_range = variable['range']
-                model_str = ""
-
-                if isinstance(variable_range, list):
-                  # 1D
-                  #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200]),
-                  #
-                  bins = len(variable_range) - 1
-                  # Convert Python list [12, 17...] to C++ string "12, 17, ..."
-                  edges_str = ", ".join(map(str, variable_range))
-                  model_str = f'{bins}, (const double[]){{{edges_str}}}'
-                elif isinstance(variable_range, tuple):
-                  if len(variable_range) == 3:
-                    # 1D
-                    #     'range' : (200,10,500),
-                    #
-                    bins, v_min, v_max = variable_range
-                    model_str = f'{bins}, {v_min}, {v_max}'
-
-                  elif len(variable_range) == 6:
-                    # 2D
-                    #     'range' : (5, 0.0, 1.0, 10,  0., 10000.),
-                    #
-                    model_str = ", ".join(map(str, variable_range))
-
-                  elif len(variable_range) == 2 and isinstance(variable_range[0], list):
-                    # 2D
-                    #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200],[60, 95, 110, 135, 200],),
-                    #
-                    nx, ny = len(variable_range[0]) - 1, len(variable_range[1]) - 1
-                    ex = ", ".join(map(str, variable_range[0]))
-                    ey = ", ".join(map(str, variable_range[1]))
-                    model_str = f'{nx}, (const double[]){{{ex}}}, {ny}, (const double[]){{{ey}}}'
-
-                #
-                # different booking depending if it is a 1D or 2D histogram
-                #
-
-                if 'is2d' in variable.keys() and variable['is2d'] == 1:
-                  # print ("variable['name'].split(':')", variable['name'].split(':'))
-                  # Split "varX:varY" into separate columns
-                  v_x, v_y = variable['name'].split(':')
-                  histo_call = f'Histo2D({{"h_{variableName}", "{variableName}", {model_str}}}, "{v_x}", "{v_y}", "my_sample_weight")'
-
-                  # We add each RResultPtr to a vector called 'histograms'
-                  define_variables_logic += f'    hist_map_2D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
-
-                else:
-                  # histo_call = f'Histo1D({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight")'
-                  histo_call = f'Histo1D<float>({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight")'
-                  # Possible optimization explicitly saying <float>?
-                  # FIXME : maybe trigger "int" when needed or it's ok since most of the times it's a float and at most you cast an int into a float?
-
-
-
-                  # We add each RResultPtr to a vector called 'histograms'
-                  define_variables_logic += f'    hist_map_1D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
-
-                #
-                # if subsamples then there are new "cuts available"
-                #
-                if subsamples :
-                  for sub_name, sub_cut_name in subsamples.items():
-                    define_variables_logic += f'    auto node_{this_cutName}_{sampleName}_{sub_name} = node_{this_cutName}.Filter("{sub_cut_name[0]}", "cut_{sampleName}_{sub_name}");\n'
-
-                    if 'is2d' in variable.keys() and variable['is2d'] == 1:
-                      v_x, v_y = variable['name'].split(':')
-                      histo_call = f'Histo2D({{"h_{variableName}", "{variableName}", {model_str}}}, "{v_x}", "{v_y}", "my_sample_weight")'
-                      define_variables_logic += f'    hist_map_2D["{this_cutName}_{sampleName}_{sub_name}"].push_back(node_{this_cutName}_{sampleName}_{sub_name}.{histo_call});\n'
-                    else:
-                      histo_call = f'Histo1D<float>({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight")'
-                      define_variables_logic += f'    hist_map_1D["{this_cutName}_{sampleName}_{sub_name}"].push_back(node_{this_cutName}_{sampleName}_{sub_name}.{histo_call});\n'
-
-
-
-
-                # # We add each RResultPtr to a vector called 'histograms'
-                # define_variables_logic += f'    hist_map_1D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
-                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
-                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(ROOT::RDF::RResultPtr<TH1D> (node_{this_cutName}.{histo_call}) );\n'
-
-                # We add each RResultPtr to a vector called 'histograms'
-                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight"));\n'
-
-
-###                 (bins, v_min, v_max) = variable['range']
-###                 # We add each RResultPtr to a vector called 'histograms'
-###                 define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "my_sample_weight"));\n'
-
-
-        define_variables_logic += f'    \n'
-        define_variables_logic += f'    std::vector<std::string> list_of_variables_1D;\n'
-        define_variables_logic += f'    std::vector<std::string> list_of_variables_2D;\n'
-        define_variables_logic += f'    std::vector<int> list_of_variables_fold_1D;\n'
-        define_variables_logic += f'    std::vector<int> list_of_variables_fold_2D;\n'
-
-        for variableName, variable in self._variables.items():
-          if 'is2d' in variable.keys() and variable['is2d'] == 1:
-            #  2D::   vary:varx
-            define_variables_logic += f'    list_of_variables_2D.push_back("{variableName}");\n'
-            if 'fold' in variable.keys():
-              define_variables_logic += f'    list_of_variables_fold_2D.push_back({variable["fold"]});\n'
-            else :
-              define_variables_logic += f'    list_of_variables_fold_2D.push_back(0);\n'
-          else :
-            #  1D::   var
-            define_variables_logic += f'    list_of_variables_1D.push_back("{variableName}");\n'
-            if 'fold' in variable.keys():
-              define_variables_logic += f'    list_of_variables_fold_1D.push_back({variable["fold"]});\n'
-            else :
-              define_variables_logic += f'    list_of_variables_fold_1D.push_back(0);\n'
-
-
-
-        cpp_code = f"""
-#include "ROOT/RDataFrame.hxx"
-#include "ROOT/RDFHelpers.hxx"
-#include "ROOT/RVec.hxx"
-
-#include "TFile.h"
-#include "TH1D.h"
-#include "TDirectory.h"
-#include "TChain.h"
-#include <map>
-#include <vector>
-#include <iostream>
 #include <string>
-#include <typeinfo>
+#include <vector>
+#include "TH1.h"
+#include "TTree.h"
+#include "ROOT/RDataFrame.hxx"
+
+// Prototypes for your functions
+void FoldHistogram(TH1* h, int doFold);
+TH1D* UnrollHistogram(TH2D* h2);
+ROOT::RDF::RNode SafeDefine(ROOT::RDF::RNode df, std::string var, std::string expr);
+std::vector<std::string> getBranchNames(TTree* tree);
+
+#endif // LIBRARY_UTILS_H
+
+        """
+
+        cpp_code_library = f"""
+
+#include "library_utils.h"
 
 //
 // doFold
@@ -781,6 +285,580 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
 }}
 
 
+        """
+
+
+
+        with open(f"{self._scripts_run_folder}/library_utils.cpp", "w") as f:
+            f.write(cpp_code_library)
+
+        with open(f"{self._scripts_run_folder}/library_utils.h", "w") as f:
+            f.write(cpp_code_library_header)
+
+
+
+    # _____________________________________________________________________________
+    #                                                              "file_path" is a list of root files!
+    def create_cpp_source_list_of_files(self, output_name, tree_name, file_path, output_root_file_name, sampleName, weight,
+                                        aliases_to_be_defined, functions_to_be_defined,
+                                        subsamples):
+
+        # This is your C++ template as a Python string
+
+        define_input_files_logic = ""
+
+        define_input_files_logic += f"//  Nominal input files\n"
+
+        define_input_files_logic += f'    auto* nominal = new TChain("{tree_name}");\n'
+
+        # define_input_files_logic += f'    nominal->Add("{file_path}");\n'
+
+        for file_name in file_path:
+          define_input_files_logic += f'    nominal->Add("{file_name}");\n'
+
+        define_input_files_logic += f'    \n'
+        define_input_files_logic += f'    auto nominalBranches = getBranchNames(nominal);\n'
+        define_input_files_logic += f'    \n'
+
+        #
+        # now define the nuisances based on alternative trees
+        #
+        # 'kind': 'suffix',
+        # 'type': 'shape',
+        #
+        # 'mapUp': 'ElepTup',
+        # 'mapDown': 'ElepTdo',
+        #
+        #      'folderUp'    :   '/eos/cms/store/group/phys_higgs/cmshww/amassiro/HWWNano/Summer20UL18_106x_nAODv9_Full2018v9/MCl1loose2018v9__MCCorr2018v9NoJERInHorn__l2tightOR2018v9__ElepTup_suffix'
+        #      'folderDown'   : ...
+        #
+        #
+
+        #
+        # extract name of root file nominal, without folder path
+        #
+
+
+        define_input_files_logic += f"//  Variations input files (if any)\n"
+
+        for nuisanceName, nuisance in self._nuisances.items():
+
+          if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
+
+            # One TChain up and one TChain down, then add all the root files
+            define_input_files_logic += f'''    auto* friend_{nuisance['mapUp']} = new TChain("{tree_name}");\n'''
+            define_input_files_logic += f'''    auto* friend_{nuisance['mapDown']} = new TChain("{tree_name}");\n'''
+
+            for file_name in file_path:
+
+              # Find the index of the first "/" from the right
+              index = file_name.rfind("/")
+              # Extract everything from that index + 1 to the end
+              # (We add 1 so we don't include the "/" itself)
+              file_path_only_file_no_folder = file_name[index + 1:]
+
+              define_input_files_logic += f'''    friend_{nuisance['mapUp']}->Add("{nuisance['folderUp']}/{file_path_only_file_no_folder}");\n'''
+              define_input_files_logic += f'''    friend_{nuisance['mapDown']}->Add("{nuisance['folderDown']}/{file_path_only_file_no_folder}");\n'''
+
+            # add friend TChain only once
+            define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapUp']}, "{nuisance['mapUp']}");\n'''
+            define_input_files_logic += f'''    nominal->AddFriend(friend_{nuisance['mapDown']}, "{nuisance['mapDown']}");\n'''
+
+            # varied branches are the same for all "added" trees
+            define_input_files_logic += f'''    auto varBranches_{nuisance['mapUp']} = getBranchNames(friend_{nuisance['mapUp']});\n'''
+            define_input_files_logic += f'''    auto varBranches_{nuisance['mapDown']} = getBranchNames(friend_{nuisance['mapDown']});\n'''
+
+
+        define_input_files_logic += f'    ROOT::RDataFrame base_df(*nominal);\n'
+        # define_input_files_logic += f'    ROOT::RDF::RInterface varied_df = base_df;\n'
+        define_input_files_logic += f'    auto varied_df = ROOT::RDF::RNode(base_df);\n'
+
+
+        #
+        # define the weights needed for this specific sample
+        #
+        define_weights = ""
+        define_weights += f"//  weigths needed\n"
+        define_weights += f'    varied_df = SafeDefine(varied_df, "my_sample_weight", "{weight}");\n'
+
+
+        #
+        # define the aliases needed for this specific sample
+        #
+        define_aliases = ""
+        define_aliases += f"//  aliases/define needed\n"
+
+        for aliasName, alias in aliases_to_be_defined.items():
+          define_aliases += f'    varied_df = SafeDefine(varied_df, "{aliasName}", "{alias}");\n'
+
+
+        #
+        # define the aliases and functions needed for this specific sample
+        #
+        code_of_function_to_include = ""
+
+        define_aliases_functions = ""
+        define_aliases_functions += f"//  aliases of functions\n"
+
+        # not SafeDefine since these are new variables ... make it so!
+        for aliasName, alias in functions_to_be_defined.items():
+          if 'external' in alias.keys():
+            with open(alias["external"], "r") as file: # this is the file with the c++ code to be included
+              code_of_function_to_include += file.read()
+          code_of_function_to_include += "\n"
+
+          define_aliases_functions += "    varied_df = varied_df"
+
+          if 'xmlfile' not in alias.keys(): # if "xmlfile" is present, it's a TMVA and it requires casting to float
+            for i, var in enumerate(alias["variables"]):
+              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}", "{var}")'
+          else:  # if "xmlfile" is present, it's a TMVA and it requires casting to float
+            for i, var in enumerate(alias["variables"]):
+              define_aliases_functions += f'\n                     .Define("_var_{aliasName}_{i}_f", "(float){var}")'
+
+          define_aliases_functions += ";\n"
+
+          # if a simple c++ function
+          if 'xmlfile' not in alias.keys():
+            define_aliases_functions += f'\n'
+            new_names = [f"_var_{aliasName}_{i}" for i in range(len(alias["variables"]))]
+            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+            define_aliases_functions += f'    varied_df = varied_df.Define("{aliasName}", {alias["function"]}, {sintax_variables} );\n'
+            define_aliases_functions += f'\n'
+          # if "xmlfile" is present, it's a TMVA
+          elif 'xmlfile' in alias.keys():
+            define_aliases_functions += f'\n'
+            submission_dir = os.getcwd()
+            define_aliases_functions += f'''    TMVA::Experimental::RReader my_model_{aliasName}("{submission_dir}/{alias['xmlfile']}");\n'''
+
+            new_names = [f"_var_{aliasName}_{i}_f" for i in range(len(alias["variables"]))]
+            sintax_variables = '{ "' + '", "'.join(new_names) + '" }'
+
+            define_aliases_functions += f'''    varied_df = varied_df.Define("{aliasName}",
+                     TMVA::Experimental::Compute<{len(alias['variables'])}, float>(my_model_{aliasName}),
+                     {sintax_variables});\n'''
+            define_aliases_functions += f'\n'
+
+
+        #
+        # register the variations
+        #
+        #  some aliases do be defined AFTER Vary : e.g. BDT after vary of "scale of lepton"
+        #     register_variations_logic_for_alternative_trees --> variations defined before aliases
+        #  some aliases do be defined BEFORE Vary: define of "weights"
+        #     register_variations_logic --> variations defined after aliases
+        #
+
+        register_variations_logic_for_alternative_trees = ""
+        register_variations_logic_for_alternative_trees += f"//  Register the variations for alternative trees. They must defined as soon as possible\n"
+        register_variations_logic_for_alternative_trees = "\n"
+
+
+        register_variations_logic = ""
+        register_variations_logic += f"//  Register the variations\n"
+
+        if len(self._nuisances) != 0 :
+          first_time_suffix = 0
+          for nuisanceName, nuisance in self._nuisances.items():
+
+            #
+            # "shape" : "suffix" nuisances
+            #  a.k.a. alternative friend trees
+            #  also the use of a different weight is possible, to be activated with "weigthsPerSample"    FIXME  Not yet implemented ... was this ever used?
+            #         NB: suffix AND weight at the same time is yet NOT implemented (is it possible with RDataFrame?) FIXME
+            #
+            #  e.g.
+            #    'mapUp': 'ElepTup',
+            #    'mapDown': 'ElepTdo',
+            #    'samples': dict((skey, ['1', '1']) for skey in mcALL),
+            #    'folderUp': makeMCDirectory('ElepTup_suffix'),
+            #    'folderDown': makeMCDirectory('ElepTdo_suffix'),
+            #    'weigthsPerSample': true
+            #
+            #
+            if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffix'):
+
+              if first_time_suffix == 0 :
+                register_variations_logic_for_alternative_trees += f'    int suffix_size = 0;\n'
+                first_time_suffix = 1
+
+              register_variations_logic_for_alternative_trees += f'''    suffix_size = {len(nuisance['mapUp']) + 1};\n'''
+              register_variations_logic_for_alternative_trees += f'''    for (const auto& branch : varBranches_{nuisance['mapUp']}) {{\n'''
+              register_variations_logic_for_alternative_trees += f'''      if (int(branch.size()) >= (suffix_size-1) && branch.compare(branch.size() - (suffix_size-1), (suffix_size-1), "{nuisance['mapUp']}") == 0 ) {{\n'''
+              register_variations_logic_for_alternative_trees += f'''        std::string nomCol = branch.substr(0, branch.size() - suffix_size);\n'''
+              #
+              # check if the varied column exists also in the nominal ttree
+              # If it does not exist, skip. But ... how is it possible you have the varied value but not the nominal one? How did you produce the varied variable?
+              #
+              register_variations_logic_for_alternative_trees += f'''        if (std::find(nominalBranches.begin(), nominalBranches.end(), nomCol) != nominalBranches.end()) {{\n'''
+              register_variations_logic_for_alternative_trees += f'''          std::string expression = "ROOT::RVec<" + varied_df.GetColumnType(nomCol) + ">{{static_cast<" + varied_df.GetColumnType(nomCol) + ">(" + branch + ")}}";\n'''
+              #
+              # why do I have long float vs float between the nominal and the varied variable?
+              # FIXME: some fix might be needed in the post-processing step --> removing the (technically not-needed) casting might make this code faster
+              #
+              register_variations_logic_for_alternative_trees += f'''          varied_df = varied_df.Vary(\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    nomCol,\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    expression,\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    {{"up"}},\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    "{nuisance['name']}"\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    );\n'''
+              register_variations_logic_for_alternative_trees += f'''        }};\n'''
+              register_variations_logic_for_alternative_trees += f'''      }};\n'''
+              register_variations_logic_for_alternative_trees += f'''    }};\n'''
+
+              register_variations_logic_for_alternative_trees += f'''    \n'''
+              register_variations_logic_for_alternative_trees += f'''    suffix_size = {len(nuisance['mapDown']) + 1};\n'''
+              register_variations_logic_for_alternative_trees += f'''    for (const auto& branch : varBranches_{nuisance['mapDown']}) {{\n'''
+              register_variations_logic_for_alternative_trees += f'''      if (int(branch.size()) >= (suffix_size-1) && branch.compare(branch.size() - (suffix_size-1), (suffix_size-1), "{nuisance['mapDown']}") == 0 ) {{\n'''
+              register_variations_logic_for_alternative_trees += f'''        std::string nomCol = branch.substr(0, branch.size() - suffix_size);\n'''
+              register_variations_logic_for_alternative_trees += f'''        if (std::find(nominalBranches.begin(), nominalBranches.end(), nomCol) != nominalBranches.end()) {{\n'''
+              register_variations_logic_for_alternative_trees += f'''          std::string expression = "ROOT::RVec<" + varied_df.GetColumnType(nomCol) + ">{{static_cast<" + varied_df.GetColumnType(nomCol) + ">(" + branch + ")}}";\n'''
+              register_variations_logic_for_alternative_trees += f'''          varied_df = varied_df.Vary(\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    nomCol,\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    expression,\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    {{"do"}},\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    "{nuisance['name']}"\n'''
+              register_variations_logic_for_alternative_trees += f'''                                    );\n'''
+              register_variations_logic_for_alternative_trees += f'''        }};\n'''
+              register_variations_logic_for_alternative_trees += f'''      }};\n'''
+              register_variations_logic_for_alternative_trees += f'''    }};\n'''
+
+            #
+            # "shape" : "weight" nuisances
+            #  a.k.a. same tree but with a different weight
+            #
+            #  e.g. nominal,         up,                      down
+            #    ['SFweightMu', 'SFweightMuUp',         'SFweightMuDown']
+            #    ['LepWPSF',    'LepWPSF*SFweightMuUp', 'LepWPSF*SFweightMuDown']
+            #  or
+            #         up,             down
+            #    ['SFweightMuUp', 'SFweightMuDown']
+            #     --> in this second definition the system assumes this is a multiplicative effect, namely the nominal is a "1."
+            #         and it's always applied, since there is no check that the "nominal" exists
+            #         while above the system first checks that the nominal exists before applying the variation
+            #
+            #
+            if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'weight'):
+
+              if len(nuisance['samples'][sampleName]) == 3:
+                #
+                # check if '{nuisance['samples'][sampleName][0]}' is in the string 'weight' (that is actually defined in 'my_sample_weight')
+                # if yes, propagate the weight variation
+
+                if nuisance['samples'][sampleName][0] in weight:
+
+                  variation_up   =  weight.replace(nuisance['samples'][sampleName][0], nuisance['samples'][sampleName][1])
+                  variation_down =  weight.replace(nuisance['samples'][sampleName][0], nuisance['samples'][sampleName][2])
+
+                  register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
+                  register_variations_logic += f'''      "my_sample_weight",\n'''
+                  register_variations_logic += f'''      "ROOT::RVecD{{{variation_up},{variation_down}}}",\n'''
+                  register_variations_logic += f'''      {{"up", "do"}},\n'''
+                  register_variations_logic += f'''      "{nuisance['name']}"\n'''
+                  register_variations_logic += f'''      );\n'''
+
+              else :
+
+                  variation_up     =  f"({weight}) * {nuisance['samples'][sampleName][0]}"
+                  variation_down   =  f"({weight}) * {nuisance['samples'][sampleName][1]}"
+
+                  register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
+                  register_variations_logic += f'''      "my_sample_weight",\n'''
+                  register_variations_logic += f'''      "ROOT::RVecD{{{variation_up},{variation_down}}}",\n'''
+                  register_variations_logic += f'''      {{"up", "do"}},\n'''
+                  register_variations_logic += f'''      "{nuisance['name']}"\n'''
+                  register_variations_logic += f'''      );\n'''
+
+
+        booking_logic = ""
+
+
+        #
+        # In RDataFrame, all variables must be defined before being plotted
+        # The pro of this is that they can be used also in cuts
+        #
+        #
+        # In case of already defined variables, for example "mll", and "mll" is already defined in the TTree,
+        # the code "SafeDefine" should handle this, and "Define" a variable only when needed
+        #
+
+        booking_logic += f"//  Initial ...\n"
+        booking_logic += f'    auto current_node = ROOT::RDF::RNode(varied_df);\n'
+
+
+        define_variables_logic = ""
+        define_variables_logic += f"//  I need to define the RNode, otherwise SafeDefine will not work\n"
+        define_variables_logic += f"    // Define variables \n"
+        for variableName, variable in self._variables.items():
+          if 'is2d' in variable.keys() and variable['is2d'] == 1:
+            pass
+          else:
+            # only for 1D variables
+            name = variable['name']
+            define_variables_logic += f'    current_node = SafeDefine(current_node, "{variableName}", "{name}");\n'
+
+
+
+        #
+        # if "supercut" is defined, use it to speed up
+        #
+        if self._supercut != '' :
+          define_variables_logic += f'    current_node = current_node.Filter("{self._supercut}", "supercut");\n'
+
+
+
+        #
+        # once all variables are defined, they can be used and plotted with "variableName"
+        #
+        # In root file:    <cut>/<variable>/histo_<sample>
+        #
+        for cutName, cut in self._cuts.items():
+          #
+          # cuts could be nested, i.e. cut -> categories
+          # here is where you exploit the full power of RDataFrame
+          #
+          # Procedure:
+          # - check if categories
+          # - if yes, then define the cuts in a nested way
+          # - otherwise if "expr" is defined use it
+          #   if note use directly "cut"
+          #
+          # Different possibilities:
+          #
+          # cut["DY"] = "mll>50 && mll<120"
+          # cut["DY"] = {   'expr': 'mll>70 && mll<110' }
+          # cut["DY"] = {
+          #    'expr': 'mll>70 && mll<110',
+          #    'categories' : {
+          #       'eleele' : 'ee',   # "ee" is defined in aliases.py
+          #       'mumu'   : 'mm',   # "mm" is defined in aliases.py
+          #      }
+          #    }
+          #
+
+          list_cuts = {}
+          if isinstance(cut, dict):
+            # "cut" is a dictionary
+            expression = cut['expr']
+            categories = cut.get('categories', {})
+            if categories :
+              list_cuts[ cutName ] = "(" + expression + ")"   # add the un-categorized phase space too! it comes "for free"
+              for category_name, category in categories.items():
+                # list_cuts[ cutName + "_" + category_name] = "(" + expression + ") && (" + category + ")"
+                # this above is not needed, as handled by the branching of the nodes
+                list_cuts[ cutName + "_" + category_name] = "(" + category + ")"
+            else :
+              list_cuts[ cutName ] = expression
+          else :
+            list_cuts[ cutName ] = cut
+
+
+          mother_cut_name = ""
+          for icut, (this_cutName, this_cut) in enumerate(list_cuts.items()):
+            if len(list_cuts) > 1 :
+              if icut == 0:
+                define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
+                mother_cut_name = this_cutName
+              else:
+                # with this I'm nesting the node into the "mother node" -> it's RDataFrame power
+                define_variables_logic += f'    auto node_{this_cutName} = node_{mother_cut_name}.Filter("{this_cut}", "{this_cutName}");\n'
+            else :
+              define_variables_logic += f'    auto node_{this_cutName} = current_node.Filter("{this_cut}", "{this_cutName}");\n'
+
+            #
+            # if subsamples are defined for this specific sample
+            #
+            #
+            #   'subsamples': {
+            #     #            definition          specific weight
+            #     'Low' : { 'cut' : 'mll<40',    'weight' :  '1.34'},
+            #     'High': { 'cut' : 'mll>40',    'weight' :  '1.00'}
+            #   }
+            #
+            # subsamples can be useful for:
+            #  - EFT samples
+            #  - unfolding
+            #
+            # define the "cuts" nodes for the subsamples
+            #
+            if subsamples :
+              for sub_name, sub_cut_name in subsamples.items():
+                if 'cut' in sub_cut_name.keys():
+                  define_variables_logic += f'''    ROOT::RDF::RNode node_{this_cutName}___{sampleName}_{sub_name} = node_{this_cutName}.Filter("{sub_cut_name['cut']}", "cut_{sampleName}_{sub_name}");\n'''
+                  if 'weight' in sub_cut_name.keys():
+                    define_variables_logic += f'    node_{this_cutName}___{sampleName}_{sub_name} = SafeDefine(node_{this_cutName}___{sampleName}_{sub_name}, "my_sample_weight_{sampleName}_{sub_name}", "({weight})*{sub_cut_name['weight']}");\n'
+                elif 'weight' in sub_cut_name.keys():
+                    define_variables_logic += f'    node_{this_cutName} = SafeDefine(node_{this_cutName}, "my_sample_weight_{sampleName}_{sub_name}", "({weight})*{sub_cut_name['weight']}");\n'
+
+
+
+
+        # # Write C++ code to create a specific node for this sub_name
+        # cpp_file.write(f'auto df_{sub_name} = df_base.Filter("{sub_cut}");\n')
+        #
+        # # If the subsample has a specific weight:
+        # sub_weight = subsample_weights.get(sub_name, "1.0")
+        # cpp_file.write(f'auto df_{sub_name}_final = df_{sub_name}.Define("total_weight", "{sub_weight}");\n')
+
+
+
+            for variableName, variable in self._variables.items():
+                #  Different options for range definition:
+                #
+                #  1D histograms:
+                #     'range' : (200,10,500),
+                #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200]),
+                #
+                #  2D histograms:
+                #     'range' : (5, 0.0, 1.0, 10,  0., 10000.),
+                #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200],[60, 95, 110, 135, 200],),
+                #
+
+                variable_range = variable['range']
+                model_str = ""
+
+                if isinstance(variable_range, list):
+                  # 1D
+                  #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200]),
+                  #
+                  bins = len(variable_range) - 1
+                  # Convert Python list [12, 17...] to C++ string "12, 17, ..."
+                  edges_str = ", ".join(map(str, variable_range))
+                  model_str = f'{bins}, (const double[]){{{edges_str}}}'
+                elif isinstance(variable_range, tuple):
+                  if len(variable_range) == 3:
+                    # 1D
+                    #     'range' : (200,10,500),
+                    #
+                    bins, v_min, v_max = variable_range
+                    model_str = f'{bins}, {v_min}, {v_max}'
+
+                  elif len(variable_range) == 6:
+                    # 2D
+                    #     'range' : (5, 0.0, 1.0, 10,  0., 10000.),
+                    #
+                    model_str = ", ".join(map(str, variable_range))
+
+                  elif len(variable_range) == 2 and isinstance(variable_range[0], list):
+                    # 2D
+                    #     'range' : ([12, 17, 25, 30, 35, 40, 45, 65, 200],[60, 95, 110, 135, 200],),
+                    #
+                    nx, ny = len(variable_range[0]) - 1, len(variable_range[1]) - 1
+                    ex = ", ".join(map(str, variable_range[0]))
+                    ey = ", ".join(map(str, variable_range[1]))
+                    model_str = f'{nx}, (const double[]){{{ex}}}, {ny}, (const double[]){{{ey}}}'
+
+                #
+                # different booking depending if it is a 1D or 2D histogram
+                #
+
+                if 'is2d' in variable.keys() and variable['is2d'] == 1:
+                  # print ("variable['name'].split(':')", variable['name'].split(':'))
+                  # Split "varX:varY" into separate columns
+                  v_x, v_y = variable['name'].split(':')
+                  histo_call = f'Histo2D({{"h_{variableName}", "{variableName}", {model_str}}}, "{v_x}", "{v_y}", "my_sample_weight")'
+
+                  # We add each RResultPtr to a vector called 'histograms'
+                  define_variables_logic += f'    hist_map_2D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+
+                else:
+                  # histo_call = f'Histo1D({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight")'
+                  histo_call = f'Histo1D<float>({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight")'
+                  # Possible optimization explicitly saying <float>?
+                  # FIXME : maybe trigger "int" when needed or it's ok since most of the times it's a float and at most you cast an int into a float?
+
+
+
+                  # We add each RResultPtr to a vector called 'histograms'
+                  define_variables_logic += f'    hist_map_1D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+
+                #
+                # if subsamples then there are new "cuts available"
+                #
+                if subsamples :
+                  for sub_name, sub_cut_name in subsamples.items():
+
+                    name_weight_for_subsample = "my_sample_weight"
+                    if 'weight' in sub_cut_name.keys():
+                      name_weight_for_subsample = f"my_sample_weight_{sampleName}_{sub_name}"
+
+                    if 'cut' in sub_cut_name.keys():
+                      if 'is2d' in variable.keys() and variable['is2d'] == 1:
+                        v_x, v_y = variable['name'].split(':')
+                        histo_call = f'Histo2D({{"h_{variableName}", "{variableName}", {model_str}}}, "{v_x}", "{v_y}", "{name_weight_for_subsample}")'
+                        define_variables_logic += f'    hist_map_2D["{this_cutName}___{sampleName}_{sub_name}"].push_back(node_{this_cutName}___{sampleName}_{sub_name}.{histo_call});\n'
+                      else:
+                        histo_call = f'Histo1D<float>({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "{name_weight_for_subsample}")'
+                        define_variables_logic += f'    hist_map_1D["{this_cutName}___{sampleName}_{sub_name}"].push_back(node_{this_cutName}___{sampleName}_{sub_name}.{histo_call});\n'
+
+
+
+
+                # # We add each RResultPtr to a vector called 'histograms'
+                # define_variables_logic += f'    hist_map_1D["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.{histo_call});\n'
+                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(ROOT::RDF::RResultPtr<TH1D> (node_{this_cutName}.{histo_call}) );\n'
+
+                # We add each RResultPtr to a vector called 'histograms'
+                # define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {model_str}}}, "{variableName}", "my_sample_weight"));\n'
+
+
+###                 (bins, v_min, v_max) = variable['range']
+###                 # We add each RResultPtr to a vector called 'histograms'
+###                 define_variables_logic += f'    hist_map["{this_cutName}"].push_back(node_{this_cutName}.Histo1D({{"h_{variableName}", "{variableName}", {bins}, {v_min}, {v_max}}}, "{variableName}", "my_sample_weight"));\n'
+
+
+        define_variables_logic += f'    \n'
+        define_variables_logic += f'    std::vector<std::string> list_of_variables_1D;\n'
+        define_variables_logic += f'    std::vector<std::string> list_of_variables_2D;\n'
+        define_variables_logic += f'    std::vector<int> list_of_variables_fold_1D;\n'
+        define_variables_logic += f'    std::vector<int> list_of_variables_fold_2D;\n'
+
+        for variableName, variable in self._variables.items():
+          if 'is2d' in variable.keys() and variable['is2d'] == 1:
+            #  2D::   vary:varx
+            define_variables_logic += f'    list_of_variables_2D.push_back("{variableName}");\n'
+            if 'fold' in variable.keys():
+              define_variables_logic += f'    list_of_variables_fold_2D.push_back({variable["fold"]});\n'
+            else :
+              define_variables_logic += f'    list_of_variables_fold_2D.push_back(0);\n'
+          else :
+            #  1D::   var
+            define_variables_logic += f'    list_of_variables_1D.push_back("{variableName}");\n'
+            if 'fold' in variable.keys():
+              define_variables_logic += f'    list_of_variables_fold_1D.push_back({variable["fold"]});\n'
+            else :
+              define_variables_logic += f'    list_of_variables_fold_1D.push_back(0);\n'
+
+
+
+
+
+        cpp_code = f"""
+
+#include "library_utils.h"
+
+#include "ROOT/RDataFrame.hxx"
+#include "ROOT/RDFHelpers.hxx"
+#include "ROOT/RVec.hxx"
+
+#include <iostream>
+#include <algorithm>
+
+#include "TFile.h"
+#include "TH1D.h"
+#include "TDirectory.h"
+#include "TChain.h"
+#include <map>
+#include <vector>
+#include <iostream>
+#include <string>
+#include <typeinfo>
+
+
+#include "TMVA/RReader.hxx"
+#include "TMVA/RInferenceUtils.hxx"
+
 
 // --- Automatically generated: code to be added for additional functions ---
 
@@ -802,6 +880,13 @@ int main() {{
 
     std::map<std::string, std::vector<ROOT::RDF::RResultPtr<TH1D>>> hist_map_1D;
     std::map<std::string, std::vector<ROOT::RDF::RResultPtr<TH2D>>> hist_map_2D;
+
+    // --- Automatically generated register nuisances variations for alternative trees ---
+    //        Alternative trees variation nuisances to be defined at the beginning because they might change the
+    //        variables that are defined downstream, e.g. njet, BDT(ptjet, ptlepton, ...)
+    //
+
+    {register_variations_logic_for_alternative_trees}
 
     // --- Automatically generated define aliases ---
 
@@ -891,11 +976,35 @@ int main() {{
     TFile out_file("{self._outputDir}/{output_root_file_name}", "RECREATE");
     int big_loop = 0;
     for (auto& [cut_label, h_list] : hist_map_1D) {{
+
+      std::string current_cut = cut_label;
+      // check if subsamples case: this_cutName___sampleName_sub_name
+      std::string sub_name = "";
+      std::string delimiter = "___";
+      size_t pos_triple = cut_label.find(delimiter);
+      if (pos_triple != std::string::npos) {{
+        std::string this_cutName = cut_label.substr(0, pos_triple);
+        std::string rest = cut_label.substr(pos_triple + 3);
+        std::string sampleName = "{sampleName}";
+        size_t pos = cut_label.find(sampleName);
+        sub_name = cut_label.substr(pos + sampleName.length() + 1);
+        current_cut = this_cutName;
+      }}
+
       // Create a folder for this cut
-      TDirectory *dir = out_file.mkdir(cut_label.c_str());
+      TDirectory *dir = out_file.GetDirectory(current_cut.c_str());
+      if (!dir) {{
+        // If it doesn't exist, create it
+        dir = out_file.mkdir(current_cut.c_str());
+      }}
+
       for (size_t ivar = 0; ivar < h_list.size(); ivar++) {{
         dir->cd();
-        TDirectory *subdir = out_file.mkdir( (cut_label+"/"+list_of_variables_1D.at(ivar)).c_str() );
+        TDirectory *subdir = out_file.GetDirectory( (current_cut+"/"+list_of_variables_1D.at(ivar)).c_str() );
+        if (!subdir) {{
+          // If it doesn't exist, create it
+          subdir = out_file.mkdir( (current_cut+"/"+list_of_variables_1D.at(ivar)).c_str() );
+        }}
         subdir->cd();
 
         // get the nominal and the variations too
@@ -905,7 +1014,8 @@ int main() {{
         for (auto& [name, histo] : all_histos) {{
           std::string temp_name;
           if (name == "nominal") {{
-              temp_name = "histo_{sampleName}";
+            if (sub_name == "") temp_name = "histo_{sampleName}";
+            else                temp_name = "histo_{sampleName}_" + sub_name;
           }}
           else {{
             temp_name = name.c_str();
@@ -915,7 +1025,8 @@ int main() {{
             //if (pos != std::string::npos) {{
             //  temp_name = temp_name.substr(0, pos);
             //}}
-            temp_name = ("histo_{sampleName}_" + temp_name);
+            if (sub_name == "") temp_name = ("histo_{sampleName}_" + temp_name);
+            else                temp_name = ("histo_{sampleName}_" + sub_name + "_" + temp_name);
           }}
           gDirectory = subdir;
           histo->SetName(temp_name.c_str());
@@ -931,51 +1042,68 @@ int main() {{
 
     big_loop = 0;
     for (auto& [cut_label, h_list] : hist_map_2D) {{
-        // Create a folder for this cut
-        TDirectory *dir = out_file.GetDirectory(cut_label.c_str());
-        if (!dir) {{
+
+      std::string current_cut = cut_label;
+      // check if subsamples case: this_cutName___sampleName_sub_name
+      std::string sub_name = "";
+      std::string delimiter = "___";
+      size_t pos_triple = cut_label.find(delimiter);
+      if (pos_triple != std::string::npos) {{
+        std::string this_cutName = cut_label.substr(0, pos_triple);
+        std::string rest = cut_label.substr(pos_triple + 3);
+        std::string sampleName = "{sampleName}";
+        size_t pos = cut_label.find(sampleName);
+        sub_name = cut_label.substr(pos + sampleName.length() + 1);
+        current_cut = this_cutName;
+      }}
+
+      // Create a folder for this cut
+      TDirectory *dir = out_file.GetDirectory(current_cut.c_str());
+      if (!dir) {{
+        // If it doesn't exist, create it
+        dir = out_file.mkdir(current_cut.c_str());
+      }}
+      for (size_t ivar = 0; ivar < h_list.size(); ivar++) {{
+        dir->cd();
+        TDirectory *subdir = out_file.GetDirectory( (current_cut+"/"+list_of_variables_2D.at(ivar)).c_str() );
+        if (!subdir) {{
           // If it doesn't exist, create it
-          dir = out_file.mkdir(cut_label.c_str());
+          subdir = out_file.mkdir( (current_cut+"/"+list_of_variables_2D.at(ivar)).c_str() );
         }}
-        for (size_t ivar = 0; ivar < h_list.size(); ivar++) {{
-          dir->cd();
-          TDirectory *subdir = out_file.GetDirectory( (cut_label+"/"+list_of_variables_2D.at(ivar)).c_str() );
-          if (!subdir) {{
-            // If it doesn't exist, create it
-            subdir = out_file.mkdir( (cut_label+"/"+list_of_variables_2D.at(ivar)).c_str() );
+        subdir->cd();
+
+        // get the nominal and the variations too
+        auto all_histos = results_2D_variations.at(big_loop);
+        big_loop++;
+
+        for (auto& [name, histo] : all_histos) {{
+          std::string temp_name;
+          if (name == "nominal") {{
+            if (sub_name == "") temp_name = "histo_{sampleName}";
+            else                temp_name = "histo_{sampleName}_" + sub_name;
           }}
-          subdir->cd();
-
-          // get the nominal and the variations too
-          auto all_histos = results_2D_variations.at(big_loop);
-          big_loop++;
-
-          for (auto& [name, histo] : all_histos) {{
-            std::string temp_name;
-            if (name == "nominal") {{
-                temp_name = "histo_{sampleName}";
-            }}
-            else {{
-              temp_name = name.c_str();
-              // scale_e_2018_UL:up --> scale_e_2018_ULup
-              temp_name.erase(std::remove(temp_name.begin(), temp_name.end(), ':'), temp_name.end());
-              //size_t pos = temp_name.find(':');
-              //if (pos != std::string::npos) {{
-              //  temp_name = temp_name.substr(0, pos);
-              //}}
-              temp_name = ("histo_{sampleName}_" + temp_name);
-            }}
-            gDirectory = subdir;
-            histo->SetName(temp_name.c_str());
-
-
-            if (list_of_variables_fold_2D.at(ivar) != 0) FoldHistogram(histo.get(), list_of_variables_fold_2D.at(ivar));
-
-            UnrollHistogram(dynamic_cast<TH2D*>(histo.get()))->Write();
-
+          else {{
+            temp_name = name.c_str();
+            // scale_e_2018_UL:up --> scale_e_2018_ULup
+            temp_name.erase(std::remove(temp_name.begin(), temp_name.end(), ':'), temp_name.end());
+            //size_t pos = temp_name.find(':');
+            //if (pos != std::string::npos) {{
+            //  temp_name = temp_name.substr(0, pos);
+            //}}
+            if (sub_name == "") temp_name = ("histo_{sampleName}_" + temp_name);
+            else                temp_name = ("histo_{sampleName}_" + sub_name + "_" + temp_name);
           }}
+          gDirectory = subdir;
+          histo->SetName(temp_name.c_str());
+
+
+          if (list_of_variables_fold_2D.at(ivar) != 0) FoldHistogram(histo.get(), list_of_variables_fold_2D.at(ivar));
+
+          UnrollHistogram(dynamic_cast<TH2D*>(histo.get()))->Write();
+
         }}
-        out_file.cd(); // Go back to root for the next directory
+      }}
+      out_file.cd(); // Go back to root for the next directory
     }}
 
 
@@ -991,6 +1119,8 @@ int main() {{
         with open(f"{output_name}.cpp", "w") as f:
             f.write(cpp_code)
         # print(f"Created {output_name}.cpp")
+
+
 
 
     # _____________________________________________________________________________
@@ -1015,7 +1145,11 @@ int main() {{
     def generate_makefile(self, file_paths, makefile_name="Makefile"):
         # Get ROOT configuration via shell calls
         cpp_flags = "$(shell root-config --cflags)"
-        ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
+        # ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
+        ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -Wl,-rpath,{self._scripts_run_folder}/"
+
+
+
         type_of_compilation = "-O2"
         # from "blabla.cpp" to "blabla"
         targets = [os.path.splitext(f)[0] for f in file_paths]
@@ -1024,22 +1158,30 @@ int main() {{
             f.write("# Generated Makefile\n")
             f.write("CXX = g++\n")
             # f.write(f"CXXFLAGS = {type_of_compilation} -Wall {cpp_flags} -std=c++20 -Wcpp \n")  # c++20 used for "ends_with"
-            f.write(f"CXXFLAGS = {type_of_compilation} -Wall {cpp_flags} \n")
+            # f.write(f"CXXFLAGS = {type_of_compilation} -Wall {cpp_flags} \n")
+            f.write(f"CXXFLAGS = {type_of_compilation} -Wall -fPIC {cpp_flags} -I{self._scripts_run_folder}/ \n")
             f.write(f"LDFLAGS = {ld_flags}\n\n")
+
+            f.write(f"LIB_NAME = liblibrary_utils.so\n\n")
+
 
             # 'all' target: the list of all executables to be created
             all_targets = " ".join(targets)
-            f.write(f"all: {all_targets}\n\n")
+            f.write(f"all: $(LIB_NAME) {all_targets}\n\n")
+
+            f.write(f"$(LIB_NAME): {self._scripts_run_folder}/library_utils.cpp {self._scripts_run_folder}/library_utils.h\n")
+            f.write(f"\t$(CXX) $(CXXFLAGS) -shared -o {self._scripts_run_folder}/$@ {self._scripts_run_folder}/library_utils.cpp\n")
 
             # The Pattern Rule
             # This says: To create ANY executable 'X', look for 'X.cpp'
             # It works across subdirectories automatically.
-            f.write("%: %.cpp\n")
-            f.write("\t$(CXX) $(CXXFLAGS) $< -o $@ $(LDFLAGS)\n\n")
+            f.write("%: %.cpp $(LIB_NAME)\n")
+            # f.write("\t$(CXX) $(CXXFLAGS) $< -o $@ -L. -llibrary_utils $(LDFLAGS)\n\n")
+            f.write(f"\t$(CXX) $(CXXFLAGS) $< -o $@ -L{self._scripts_run_folder}/ -llibrary_utils $(LDFLAGS)\n\n")
 
             # Clean target
             f.write("clean:\n")
-            f.write(f"\trm -f {all_targets}\n")
+            f.write(f"\trm -f $(LIB_NAME) {all_targets}\n")
 
 
     # _____________________________________________________________________________
@@ -1072,6 +1214,11 @@ int main() {{
         ROOT.TH1.SetDefaultSumw2(True)
 
         os.system ("mkdir " + self._scripts_run_folder + "/")
+
+        #
+        # create the header and cpp code for the library with useful functions
+        #
+        self.create_library_cpp()
 
         list_of_files_to_compile = []
 

@@ -3053,6 +3053,17 @@ if __name__ == '__main__':
       # clean the dictionary to remove globals due to "exec" funcionality
       samples = {k: v for k, v in samples.items() if not (k.startswith('__') and k.endswith('__'))}
 
+    # flatten subsamples
+    original_keys = list(samples.keys())
+    for sample_name in original_keys:
+      sample_info = samples[sample_name]
+      subsamples = sample_info.get('subsamples')
+      if subsamples:
+        for sub_name, sub_config in subsamples.items():
+          new_key = f"{sample_name}_{sub_name}"
+          samples[new_key] = {}
+
+
     # print ("samples = ", samples)
 
     #
