@@ -693,9 +693,9 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
                 if 'cut' in sub_cut_name.keys():
                   define_variables_logic += f'''    ROOT::RDF::RNode node_{this_cutName}___{sampleName}_{sub_name} = node_{this_cutName}.Filter("{sub_cut_name['cut']}", "cut_{sampleName}_{sub_name}");\n'''
                   if 'weight' in sub_cut_name.keys():
-                    define_variables_logic += f'    node_{this_cutName}___{sampleName}_{sub_name} = SafeDefine(node_{this_cutName}___{sampleName}_{sub_name}, "my_sample_weight_{sampleName}_{sub_name}", "({weight})*{sub_cut_name['weight']}");\n'
+                    define_variables_logic += f'    node_{this_cutName}___{sampleName}_{sub_name} = SafeDefine(node_{this_cutName}___{sampleName}_{sub_name}, "my_sample_weight_{sampleName}_{sub_name}", "(my_sample_weight)*{sub_cut_name['weight']}");\n'
                 elif 'weight' in sub_cut_name.keys():
-                    define_variables_logic += f'    node_{this_cutName} = SafeDefine(node_{this_cutName}, "my_sample_weight_{sampleName}_{sub_name}", "({weight})*{sub_cut_name['weight']}");\n'
+                    define_variables_logic += f'    node_{this_cutName} = SafeDefine(node_{this_cutName}, "my_sample_weight_{sampleName}_{sub_name}", "(my_sample_weight)*{sub_cut_name['weight']}");\n'
 
 
 
