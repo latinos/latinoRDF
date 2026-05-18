@@ -557,10 +557,17 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
                   register_variations_logic += f'''      "{nuisance['name']}"\n'''
                   register_variations_logic += f'''      );\n'''
 
+              #
+              # otherwise it means that is a multiplicative weight, meaning {original weight} * up/down weight
+              # If such, I can exploit "my_sample_weight" and not use the extended definition
+              #
+
               else :
 
-                  variation_up     =  f"({weight}) * {nuisance['samples'][sampleName][0]}"
-                  variation_down   =  f"({weight}) * {nuisance['samples'][sampleName][1]}"
+                  # variation_up     =  f"({weight}) * {nuisance['samples'][sampleName][0]}"
+                  # variation_down   =  f"({weight}) * {nuisance['samples'][sampleName][1]}"
+                  variation_up     =  f"(my_sample_weight) * {nuisance['samples'][sampleName][0]}"
+                  variation_down   =  f"(my_sample_weight) * {nuisance['samples'][sampleName][1]}"
 
                   register_variations_logic += f'''    varied_df = varied_df.Vary(\n'''
                   register_variations_logic += f'''      "my_sample_weight",\n'''
@@ -1459,7 +1466,7 @@ echo "Current full path: $(pwd)"
               submit_code = f"""
 initialdir            = {name_folder}
 executable            = {name_bash}
-transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder}
+transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder} {self._scripts_run_folder}/liblibrary_utils.so
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
 output                = {output_file}
