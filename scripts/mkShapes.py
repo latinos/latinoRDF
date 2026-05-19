@@ -993,8 +993,8 @@ int main() {{
         std::string this_cutName = cut_label.substr(0, pos_triple);
         std::string rest = cut_label.substr(pos_triple + 3);
         std::string sampleName = "{sampleName}";
-        size_t pos = cut_label.find(sampleName);
-        sub_name = cut_label.substr(pos + sampleName.length() + 1);
+        size_t pos = rest.find(sampleName);
+        sub_name = rest.substr(pos + sampleName.length() + 1);
         current_cut = this_cutName;
       }}
 
@@ -1153,9 +1153,7 @@ int main() {{
         # Get ROOT configuration via shell calls
         cpp_flags = "$(shell root-config --cflags)"
         # ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
-        ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -Wl,-rpath,{self._scripts_run_folder}/"
-
-
+        ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
 
         type_of_compilation = "-O2"
         # from "blabla.cpp" to "blabla"
@@ -1466,7 +1464,7 @@ echo "Current full path: $(pwd)"
               submit_code = f"""
 initialdir            = {name_folder}
 executable            = {name_bash}
-transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder} {self._scripts_run_folder}/liblibrary_utils.so
+transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder} {submission_dir}/{self._scripts_run_folder}/liblibrary_utils.so
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
 output                = {output_file}
