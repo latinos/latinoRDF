@@ -1464,7 +1464,7 @@ echo "Current full path: $(pwd)"
               submit_code = f"""
 initialdir            = {name_folder}
 executable            = {name_bash}
-transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder} {submission_dir}/{self._scripts_run_folder}/liblibrary_utils.so
+transfer_input_files  = {submission_dir}/{name_folder_code}{name_code_no_folder}, {submission_dir}/{self._scripts_run_folder}/liblibrary_utils.so
 should_transfer_files   = YES
 when_to_transfer_output = ON_EXIT
 output                = {output_file}

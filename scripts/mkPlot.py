@@ -342,7 +342,8 @@ class PlotFactory:
 
         #---- save one TCanvas for every cut and every variable
         for cutName in self._cuts :
-          print ("cut =", cutName)
+          if not self._silentMode:
+            print ("cut =", cutName)
           for variableName, variable in self._variables.items():
             if 'cuts' in variable and cutName not in variable['cuts']:
               continue
@@ -350,7 +351,8 @@ class PlotFactory:
             if type(fileIn) is not dict and not fileIn.GetDirectory(cutName+"/"+variableName):
               continue
 
-            print ("variableName =", variableName)
+            if not self._silentMode:
+              print ("variableName =", variableName)
 
             if not "divideByBinWidth" in variable.keys():
               variable["divideByBinWidth"] = 0
@@ -444,14 +446,16 @@ class PlotFactory:
                 continue
 
               shapeName = cutName+"/"+variableName+'/histo_' + sampleName
-              print ('     -> shapeName = ', shapeName)
+              if not self._silentMode:
+                print ('     -> shapeName = ', shapeName)
               if type(fileIn) is dict:
                 histo = fileIn[sampleName].Get(shapeName)
               else:
                 histo = fileIn.Get(shapeName)
               if not histo: continue
-              print (' --> ', histo)
-              print ('new_histo_' + sampleName + '_' + cutName + '_' + variableName)
+              if not self._silentMode:
+                print (' --> ', histo)
+                print ('new_histo_' + sampleName + '_' + cutName + '_' + variableName)
               histos[sampleName] = histo.Clone('new_histo_' + sampleName + '_' + cutName + '_' + variableName)
 
               # allow arbitrary scaling in MC (and DATA??), if needed
@@ -569,6 +573,7 @@ class PlotFactory:
                     sigForAdditionalRatioList[sampleName] = histos[sampleName]
                     sigForAdditionalDifferenceList[sampleName] = histos[sampleName]
                 else :
+                  print ("sampleName for integral += ", sampleName)
                   nexpected += histos[sampleName].Integral(1,histos[sampleName].GetNbinsX())   # it was (-1, -1) in the past, correct now. Overflow and underflow bins not taken into account
                   if variable['divideByBinWidth'] == 1:
                     histos[sampleName].Scale(1,"width")
@@ -806,8 +811,9 @@ class PlotFactory:
               dup2 = np.square(up - tgrMC_vy)
               ddo2 = np.square(do - tgrMC_vy)
               #                    np.where(condition, value_if_true, value_if_false)
-              print ("up_is_up, dup2, ddo2 = ", up_is_up, " , ", dup2, " , ",  ddo2)
-              print ("nuisances_err2_up = ", nuisances_err2_up)
+              if not self._silentMode:
+                print ("up_is_up, dup2, ddo2 = ", up_is_up, " , ", dup2, " , ",  ddo2)
+                print ("nuisances_err2_up = ", nuisances_err2_up)
               nuisances_err2_up += np.where(up_is_up, dup2, ddo2)
               nuisances_err2_do += np.where(up_is_up, ddo2, dup2)
 
@@ -855,9 +861,10 @@ class PlotFactory:
               if self._postFit == 'p' or self._postFit == 's' or  self._postFit == 'b':
                   tgrDataOverPF.SetPoint(iBin, tgrData_vx[iBin], self.Ratio(tgrData_vy[iBin] , histoPF.GetBinContent(iBin+1)) )
                   tgrDataOverPF.SetPointError(iBin, tgrData_evx[iBin], tgrData_evx[iBin], self.Ratio(tgrData_evy_do[iBin], histoPF.GetBinContent(iBin+1)) , self.Ratio(tgrData_evy_up[iBin], last.GetBinContent(iBin+1)) )
-                  print ("Pre-fit ratio: " + str(self.Ratio(tgrData_vy[iBin] , histoPF.GetBinContent(iBin+1))))
-                  print ("Post-fit ratio: " + str(self.Ratio(tgrData_vy[iBin] , last.GetBinContent(iBin+1))))
-                  print (iBin)
+                  if not self._silentMode:
+                    print ("Pre-fit ratio: " + str(self.Ratio(tgrData_vy[iBin] , histoPF.GetBinContent(iBin+1))))
+                    print ("Post-fit ratio: " + str(self.Ratio(tgrData_vy[iBin] , last.GetBinContent(iBin+1))))
+                    print (iBin)
               #
               # data - MC :
               #    MC could be background only
@@ -910,7 +917,8 @@ class PlotFactory:
             # if variable['divideByBinWidth'] == 1 and histo_total != None:
             if variable['divideByBinWidth'] == 1 and histo_total:
               histo_total.Scale(1,"width")
-            print ('--> histo_total = ', histo_total)
+            if not self._silentMode:
+              print ('--> histo_total = ', histo_total)
 
             #                                  if there is "histo_total" there is no need of explicit nuisances
             # if (not self._removeMCStat) or len(mynuisances.keys()) != 0 or histo_total!= None:
@@ -1006,7 +1014,8 @@ class PlotFactory:
                 continue
 
               if sampleConfiguration['isSignal'] == 1 :
-                  print ("############################################################## isSignal 1", sampleNameGroup)
+                  if not self._silentMode:
+                    print ("############################################################## isSignal 1", sampleNameGroup)
                   #
                   # if, for some reason, you want to scale only the overlaid signal
                   # for example to show the shape of the signal, without affecting the actual stacked (true) distribution
@@ -1019,7 +1028,8 @@ class PlotFactory:
                   else :
                     thsSignal_grouped.Add(histos_grouped[sampleNameGroup])
               elif sampleConfiguration['isSignal'] == 2 :
-                  print ("############################################################## isSignal 2", sampleNameGroup)
+                  if not self._silentMode:
+                    print ("############################################################## isSignal 2", sampleNameGroup)
                   groupFlag = True
                   sigSupList_grouped.append(histos_grouped[sampleNameGroup])
               # the signal is added on top of the background
@@ -3025,8 +3035,6 @@ if __name__ == '__main__':
 
     print ("opt.submitBatch      = ", opt.submitBatch)
     print ("opt.silentMode       = ", opt.silentMode)
-
-    # print ("opt.structureFile    = ", opt.structureFile)
 
     #
     # logic of dependencies:
