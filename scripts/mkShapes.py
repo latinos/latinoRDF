@@ -453,6 +453,11 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
         register_variations_logic_for_alternative_trees += f"//  Register the variations for alternative trees. They must defined as soon as possible\n"
         register_variations_logic_for_alternative_trees = "\n"
 
+        register_maps_logic_for_alternative_trees_on_the_fly_calculation = ""
+
+        register_variations_for_special_nuisances_on_the_fly = ""
+
+        code_of_functions_and_classes_to_include_for_special_nuisances = ""
 
         register_variations_logic = ""
         register_variations_logic += f"//  Register the variations\n"
@@ -460,6 +465,37 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
         if len(self._nuisances) != 0 :
           first_time_suffix = 0
           for nuisanceName, nuisance in self._nuisances.items():
+
+
+            #
+            # 'kind': 'suffixFly'
+            # 'name': 'CMS_res_j_2018_fly'
+            # 'pattern' : 'CMS_my_res_j_XXXX'
+            # 'numVariations' : 3,
+            # 'external' : "code/jer_on_the_fly.c",
+            # 'code_in_main' : "code/jer_on_the_fly_main.c",
+            #
+            # Nuisance based on alternative tree, calculated on the fly
+            # and whose effect is calculated as the "averaged" effect, on numVariations times
+            # E.g. JER -> affected by the choice of the seed
+            # Purpose: remove unwanted fluctuations
+            #
+            # 'external' is the code where the class/function is defined
+            # 'code_in_main' is the code that will be copied in the main, e.g. the class creation
+            #
+
+            if sampleName in nuisance['samples'].keys() and nuisance['type'] == 'shape' and ('kind' in nuisance.keys() and nuisance['kind'] == 'suffixFly'):
+
+              register_maps_logic_for_alternative_trees_on_the_fly_calculation += f'''    map_nuisances_name_for_averaged_histograms["{nuisance['pattern']}"] = std::pair<std::string, int>("{nuisance['name']}", {nuisance['numVariations']});\n'''
+
+              with open(nuisance["external"], "r") as file:
+                code_of_functions_and_classes_to_include_for_special_nuisances += file.read()
+                code_of_functions_and_classes_to_include_for_special_nuisances += "\n"
+
+              with open(nuisance["code_in_main"], "r") as file:
+                register_variations_for_special_nuisances_on_the_fly += file.read()
+                register_variations_for_special_nuisances_on_the_fly += "\n"
+
 
             #
             # "shape" : "suffix" nuisances
@@ -861,6 +897,7 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
 #include <iostream>
 #include <string>
 #include <typeinfo>
+#include <regex>
 
 
 #include "TMVA/RReader.hxx"
@@ -874,6 +911,12 @@ std::vector<std::string> getBranchNames(TTree* tree) {{
 // ----------------------------------------
 
 
+
+// --- Automatically generated: code to be added for special nuisances ---
+
+{code_of_functions_and_classes_to_include_for_special_nuisances}
+
+// ----------------------------------------
 
 
 int main() {{
@@ -894,6 +937,14 @@ int main() {{
     //
 
     {register_variations_logic_for_alternative_trees}
+
+
+
+    // --- Automatically generated register nuisances variations for alternative-like trees, as they are calculated on the fly ---
+
+    {register_variations_for_special_nuisances_on_the_fly}
+
+    // ----------------------------------------
 
     // --- Automatically generated define aliases ---
 
@@ -976,6 +1027,15 @@ int main() {{
 
     std::cout << "   Done, now save in the final root file" << std::endl;
 
+
+    //
+    // Prepare to average histograms for specific nuisances
+    //
+    //         pattern    nuisance-name
+    std::map<std::string, std::pair<std::string, int> > map_nuisances_name_for_averaged_histograms;
+
+    {register_maps_logic_for_alternative_trees_on_the_fly_calculation}
+
     //
     // In root file:    <cut>/<variable>/histo_<sample>
     //
@@ -1018,6 +1078,8 @@ int main() {{
         auto all_histos = results_1D_variations.at(big_loop);
         big_loop++;
 
+        std::map<std::string, TH1D> map_nuisances_average_histogram;
+
         for (auto& [name, histo] : all_histos) {{
           std::string temp_name;
           if (name == "nominal") {{
@@ -1040,7 +1102,62 @@ int main() {{
 
           if (list_of_variables_fold_1D.at(ivar) != 0) FoldHistogram(histo.get(), list_of_variables_fold_1D.at(ivar));
 
-          histo->Write();
+          //
+          // special treatment for nuisances based on averaged histograms
+          //
+          bool found_any_nuisances_for_averaged_histograms = false;
+          for (auto const& [string_pattern, nuisance_name_numVariations] : map_nuisances_name_for_averaged_histograms) {{
+
+            std::string nuisance_name = nuisance_name_numVariations.first;
+            int numVariations_here = nuisance_name_numVariations.second;
+
+            std::string string_pattern_up = "histo_.*__NORM__.*_" + string_pattern + "up";
+            std::string string_pattern_do = "histo_.*__NORM__.*_" + string_pattern + "do";
+
+            std::regex pattern_up(string_pattern_up);
+            std::regex pattern_do(string_pattern_do);
+
+            if (std::regex_search(temp_name, pattern_up) || std::regex_search(temp_name, pattern_do)) {{
+              std::regex pattern_to_remove("__NORM__[0-9]+_");
+              std::string histo_temp_name = std::regex_replace(temp_name, pattern_to_remove, "");
+              std::regex pattern(string_pattern);
+
+              histo_temp_name = std::regex_replace(histo_temp_name, pattern, nuisance_name); // replace with real nuisance name
+
+              histo->SetName(histo_temp_name.c_str());
+
+              if (std::regex_search(temp_name, pattern_up)) {{
+                if (auto it = map_nuisances_average_histogram.find(string_pattern + "up"); it != map_nuisances_average_histogram.end()) {{
+                  it->second.Add(histo.get(), 1. / numVariations_here);
+                }}
+                else {{
+                  map_nuisances_average_histogram[nuisance_name + "up"] = (*histo);
+                  found_any_nuisances_for_averaged_histograms = true;
+                  break; // end loop over map to save time
+                }}
+              }}
+              else {{
+                if (auto it = map_nuisances_average_histogram.find(string_pattern + "do"); it != map_nuisances_average_histogram.end()) {{
+                  it->second.Add(histo.get(), 1. / numVariations_here);
+                }}
+                else {{
+                  map_nuisances_average_histogram[nuisance_name + "do"] = (*histo);
+                  found_any_nuisances_for_averaged_histograms = true;
+                  break; // end loop over map to save time
+                }}
+              }}
+            }}
+          }}
+          // if it's NOT a histogram to be averaged, then write it directly
+          if (not found_any_nuisances_for_averaged_histograms) {{
+            histo->Write();
+          }}
+
+          // now write all the averaged histograms, up and down variations, if there are any!
+          for (auto const& [name, temp_histo] : map_nuisances_average_histogram) {{
+            temp_histo.Write();
+          }}
+
 
         }}
       }}
@@ -1083,6 +1200,8 @@ int main() {{
         auto all_histos = results_2D_variations.at(big_loop);
         big_loop++;
 
+        std::map<std::string, TH1D> map_nuisances_average_histogram;
+
         for (auto& [name, histo] : all_histos) {{
           std::string temp_name;
           if (name == "nominal") {{
@@ -1106,7 +1225,67 @@ int main() {{
 
           if (list_of_variables_fold_2D.at(ivar) != 0) FoldHistogram(histo.get(), list_of_variables_fold_2D.at(ivar));
 
-          UnrollHistogram(dynamic_cast<TH2D*>(histo.get()))->Write();
+          //UnrollHistogram(dynamic_cast<TH2D*>(histo.get()))->Write();
+
+          auto new_histo = UnrollHistogram(dynamic_cast<TH2D*>(histo.get()));
+
+
+          //
+          // special treatment for nuisances based on averaged histograms
+          //
+          bool found_any_nuisances_for_averaged_histograms = false;
+          for (auto const& [string_pattern, nuisance_name_numVariations] : map_nuisances_name_for_averaged_histograms) {{
+
+            std::string nuisance_name = nuisance_name_numVariations.first;
+            int numVariations_here = nuisance_name_numVariations.second;
+
+            std::string string_pattern_up = "histo_.*__NORM__.*_" + string_pattern + "up";
+            std::string string_pattern_do = "histo_.*__NORM__.*_" + string_pattern + "do";
+
+            std::regex pattern_up(string_pattern_up);
+            std::regex pattern_do(string_pattern_do);
+
+            if (std::regex_search(temp_name, pattern_up) || std::regex_search(temp_name, pattern_do)) {{
+              std::regex pattern_to_remove("__NORM__[0-9]+_");
+              std::string histo_temp_name = std::regex_replace(temp_name, pattern_to_remove, "");
+              std::regex pattern(string_pattern);
+
+              histo_temp_name = std::regex_replace(histo_temp_name, pattern, nuisance_name); // replace with real nuisance name
+
+              new_histo->SetName(histo_temp_name.c_str());
+
+              if (std::regex_search(temp_name, pattern_up)) {{
+                if (auto it = map_nuisances_average_histogram.find(string_pattern + "up"); it != map_nuisances_average_histogram.end()) {{
+                  it->second.Add(new_histo, 1. / numVariations_here);
+                }}
+                else {{
+                  map_nuisances_average_histogram[nuisance_name + "up"] = (*new_histo);
+                  found_any_nuisances_for_averaged_histograms = true;
+                  break; // end loop over map to save time
+                }}
+              }}
+              else {{
+                if (auto it = map_nuisances_average_histogram.find(string_pattern + "do"); it != map_nuisances_average_histogram.end()) {{
+                  it->second.Add(new_histo, 1. / numVariations_here);
+                }}
+                else {{
+                  map_nuisances_average_histogram[nuisance_name + "do"] = (*new_histo);
+                  found_any_nuisances_for_averaged_histograms = true;
+                  break; // end loop over map to save time
+                }}
+              }}
+            }}
+          }}
+          // if it's NOT a histogram to be averaged, then write it directly
+          if (not found_any_nuisances_for_averaged_histograms) {{
+            new_histo->Write();
+          }}
+
+          // now write all the averaged histograms, up and down variations, if there are any!
+          for (auto const& [name, temp_histo] : map_nuisances_average_histogram) {{
+            temp_histo.Write();
+          }}
+
 
         }}
       }}
@@ -1154,6 +1333,21 @@ int main() {{
         cpp_flags = "$(shell root-config --cflags)"
         # ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
         ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
+
+        ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
+
+
+ # -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib
+
+
+        # ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
+
+        # ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
+
+
+    # -Wl,-rpath,/cvmfs/sft.cern.ch/lcg/releases/ROOT/6.38.04-57e03/x86_64-el9-gcc13-opt/lib -pthread -lm -ldl -rdynamic -lTMVA -lXMLIO -Wl,-rpath,'$ORIGIN:/afs/cern.ch/user/a/amassiro/work/Latinos/Framework/RDF/plotsConfigurationsRDF/WW/2018/scripts_run/'
+
+
 
         type_of_compilation = "-O2"
         # from "blabla.cpp" to "blabla"
