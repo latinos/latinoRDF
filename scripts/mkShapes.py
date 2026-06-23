@@ -1328,7 +1328,7 @@ int main() {{
 
 
     # _____________________________________________________________________________
-    def generate_makefile(self, file_paths, makefile_name="Makefile"):
+    def generate_makefile(self, file_paths, dictionary_of_files_divided_by_sample, makefile_name="Makefile"):
         # Get ROOT configuration via shell calls
         cpp_flags = "$(shell root-config --cflags)"
         # ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
@@ -1353,6 +1353,7 @@ int main() {{
         # from "blabla.cpp" to "blabla"
         targets = [os.path.splitext(f)[0] for f in file_paths]
 
+
         with open(makefile_name, "w") as f:
             f.write("# Generated Makefile\n")
             f.write("CXX = g++\n")
@@ -1367,6 +1368,14 @@ int main() {{
             # 'all' target: the list of all executables to be created
             all_targets = " ".join(targets)
             f.write(f"all: $(LIB_NAME) {all_targets}\n\n")
+
+
+            # from "blabla.cpp" to "blabla"
+            for sample_key in dictionary_of_files_divided_by_sample.keys():
+              target_sample = [os.path.splitext(f)[0] for f in dictionary_of_files_divided_by_sample[sample_key]]
+              all_target_sample = " ".join(target_sample)
+              f.write(f"{sample_key}: $(LIB_NAME) {all_target_sample}\n\n")
+
 
             f.write(f"$(LIB_NAME): {self._scripts_run_folder}/library_utils.cpp {self._scripts_run_folder}/library_utils.h\n")
             f.write(f"\t$(CXX) $(CXXFLAGS) -shared -o {self._scripts_run_folder}/$@ {self._scripts_run_folder}/library_utils.cpp\n")
@@ -1420,6 +1429,7 @@ int main() {{
         self.create_library_cpp()
 
         list_of_files_to_compile = []
+        list_of_files_to_compile_divided_by_sample = {}
 
         # print ("length of samples = ", len(self._samples))
         #
@@ -1434,6 +1444,7 @@ int main() {{
           #
           # print ("length of sample['name'] = ", len(sample['name']))
 
+          list_of_files_to_compile_divided_by_sample[sampleName] = []
 
           global_weight = sample['weight'] if 'weight' in sample.keys() else "1."
 
@@ -1506,6 +1517,8 @@ int main() {{
                                                    subsamples_dict)
 
               list_of_files_to_compile.append(name_code)
+              list_of_files_to_compile_divided_by_sample[sampleName].append(name_code)
+
               # self.compile_cpp(name_code)
 
 
@@ -1522,11 +1535,12 @@ int main() {{
             #   # self.compile_cpp(name_code)
 
 
-        self.generate_makefile(list_of_files_to_compile)
+        self.generate_makefile(list_of_files_to_compile, list_of_files_to_compile_divided_by_sample)
 
         # Run the compilation in parallel
         print("Start parallel compilation...")
-        subprocess.run(["make", "-j8"])
+        # subprocess.run(["make", "-j4"])
+        # subprocess.run(["make", "-j8"])
         #
         # subprocess.run() is a blocking call -> it will make the compilation to end before the next step
         #
