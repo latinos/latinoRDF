@@ -1332,20 +1332,24 @@ int main() {{
         # Get ROOT configuration via shell calls
         cpp_flags = "$(shell root-config --cflags)"
         # ld_flags = "$(shell root-config --libs) -lTMVA -lXMLIO"  # why TMVA is not by default?!?
-        ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
+        # ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
 
-        ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
+        # ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
 
+        # $ORIGIN is where the executable is
+        # the libraries are in ../../
+        # NB: FIXME it might be useful to move them into a "lib" folder later ... for cleaner setup, but not mandatory
+        #
+        ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN/../../'"
 
- # -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib
+        # ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
+
+        # -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib
 
 
         # ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
 
         # ld_flags = f"$(shell root-config --libs) -lTMVA -lXMLIO -I/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/include -L/cvmfs/sft.cern.ch/lcg/views/LCG_109a/x86_64-el9-gcc13-opt/lib -lcorrectionlib -Wl,-rpath,'$$ORIGIN:$$ORIGIN{self._scripts_run_folder}/'"
-
-
-    # -Wl,-rpath,/cvmfs/sft.cern.ch/lcg/releases/ROOT/6.38.04-57e03/x86_64-el9-gcc13-opt/lib -pthread -lm -ldl -rdynamic -lTMVA -lXMLIO -Wl,-rpath,'$ORIGIN:/afs/cern.ch/user/a/amassiro/work/Latinos/Framework/RDF/plotsConfigurationsRDF/WW/2018/scripts_run/'
 
 
 
@@ -1538,7 +1542,10 @@ int main() {{
         self.generate_makefile(list_of_files_to_compile, list_of_files_to_compile_divided_by_sample)
 
         # Run the compilation in parallel
-        print("Start parallel compilation...")
+        # print("Start parallel compilation...")
+        print("Do not compile ... If you want to compile run the compilation by hand!")
+
+        subprocess.run(["make", "clean"])
         # subprocess.run(["make", "-j4"])
         # subprocess.run(["make", "-j8"])
         #
@@ -1602,6 +1609,59 @@ int main() {{
 
 
 
+    def parallelCompile(self):
+
+        print ("==========================")
+        print ("==== compile on batch ====")
+        print ("==========================")
+
+        where_compile = "parallel_compile"
+        os.system ("mkdir " + where_compile + "/")
+
+        submission_dir = os.getcwd()
+
+        #
+        # Loop over samples
+        #
+        for sampleName, sample in self._samples.items():
+          name_bash = where_compile + "/my_script_compile_" + sampleName + ".sh"
+
+          bash_code = f"""#!/bin/bash
+set -e  # Exit on error
+echo "Job started at $(date)"
+echo "Running on node $(hostname)"
+cd {submission_dir}
+make {sampleName}
+"""
+
+          with open(f"{name_bash}", "w") as f:
+            f.write(bash_code)
+            os.system ("chmod +x " + name_bash)
+
+
+          name_submit = where_compile + "/my_script_compile_" + sampleName + ".sub"
+
+          output_file = "/dev/null"
+          error_file  = "/dev/null"
+          log_file    = "/dev/null"
+
+          submit_code = f"""
+initialdir            = {submission_dir}
+executable            = {name_bash}
+error                 = {error_file}
+log                   = {log_file}
+getenv                = True
++JobFlavour           = "longlunch"
+queue
+"""
+
+          with open(f"{name_submit}", "w") as f:
+            f.write(submit_code)
+
+          print("Submitting job to HTCondor: condor_submit " + name_submit)
+          subprocess.run(["condor_submit", f"{name_submit}"])
+
+
 
 
     def submitBatch(self):
@@ -1634,12 +1694,19 @@ int main() {{
               name_bash = self._script_batch_location + "/" + sampleName + "/" + subname + "/" + "my_script_" + str(i) + ".sh"
               output_root_file_name = "root_file___" + sampleName + "_" + subname + "_" + str(i) + ".root"
 
+#
+# moving into a folder structure is needed to handle libraries properly
+#
+
               bash_code = f"""#!/bin/bash
 set -e  # Exit on error
 echo "Job started at $(date)"
 echo "Running on node $(hostname)"
 mkdir {self._outputDir}
-./{name_code_no_folder}
+mkdir {sampleName}/
+mkdir {sampleName}/{subname}/
+mv {name_code_no_folder} {sampleName}/{subname}/
+./{sampleName}/{subname}/{name_code_no_folder}
 cp {self._outputDir}/{output_root_file_name}  {submission_dir}/{self._outputDir}/
 
 echo "Current directory content after running:"
@@ -1714,10 +1781,12 @@ if __name__ == '__main__':
 
     parser = defaultParser()
 
-    parser.add_argument("--submitBatch", action='store_true', dest="submitBatch",   help="Trigger the submission to lxbatch")
-    parser.add_argument("--hadd",        action='store_true', dest="haddRootFiles", help="Trigger the merging of the root files")
-    parser.add_argument("--checkBatch",  action='store_true', dest="checkBatch",    help="Check if jobs are done succesfully")
-    parser.add_argument("--silentMode",  action='store_true', dest="silentMode",    help="Remove as much as possible the print and the log/err files production")
+    parser.add_argument("--parallelCompile", action='store_true', dest="parallelCompile",  help="Trigger the parallel compilation of the code, one per sample")
+    parser.add_argument("--localCompile",    action='store_true', dest="localCompile",     help="Trigger the local compilation of the code")
+    parser.add_argument("--submitBatch",     action='store_true', dest="submitBatch",      help="Trigger the submission to lxbatch")
+    parser.add_argument("--hadd",            action='store_true', dest="haddRootFiles",    help="Trigger the merging of the root files")
+    parser.add_argument("--checkBatch",      action='store_true', dest="checkBatch",       help="Check if jobs are done succesfully")
+    parser.add_argument("--silentMode",      action='store_true', dest="silentMode",       help="Remove as much as possible the print and the log/err files production")
 
     opt = parser.parse_args()
     print ("opt.pycfg            = ", opt.pycfg)
@@ -1733,6 +1802,9 @@ if __name__ == '__main__':
     print ("opt.lumi             = ", opt.lumi)
     print ("opt.outputDir        = ", opt.outputDir)
 
+
+    print ("opt.parallelCompile  = ", opt.parallelCompile)
+    print ("opt.localCompile     = ", opt.localCompile)
     print ("opt.submitBatch      = ", opt.submitBatch)
     print ("opt.hadd             = ", opt.haddRootFiles)
     print ("opt.checkBatch       = ", opt.checkBatch)
@@ -1841,8 +1913,15 @@ if __name__ == '__main__':
     # factory._lumi      = opt.lumi
     # factory._tag       = opt.tag
 
-    if not opt.submitBatch and not opt.haddRootFiles and not opt.checkBatch:
+    if not opt.submitBatch and not opt.haddRootFiles and not opt.checkBatch and not opt.localCompile and not opt.parallelCompile:
       factory.makeNominals()
+
+    if opt.localCompile :
+      # no need to call the factory, just compile
+      subprocess.run(["make", "-j4"])
+
+    if opt.parallelCompile :
+      factory.parallelCompile()
 
     if opt.submitBatch :
       factory.submitBatch()
