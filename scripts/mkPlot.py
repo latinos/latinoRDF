@@ -1336,6 +1336,12 @@ class PlotFactory:
             #               iPeriod = 0 means: free form (uses lumi_sqrtS)
             iPeriod = 4
             iPos  = 0
+
+            # iPeriod = 4 is 13 TeV  --> Run-2
+            # iPeriod = 5 is 13.6 TeV  --> Run-3
+            if 'period' in legend.keys() :
+              iPeriod = legend['period']
+
             CMS_lumi.CMS_lumi(tcanvas, iPeriod, iPos)
 
 
