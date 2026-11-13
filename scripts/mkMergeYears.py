@@ -649,7 +649,7 @@ if __name__ == '__main__':
     parser.add_argument("--checkBatch",  action='store_true', dest="checkBatch",
                         help="Report which per-cut partial files are missing")
     parser.add_argument("--hadd",        action='store_true', dest="hadd",
-                        help="Merge the per-cut partials into root_file_joined.root")
+                        help="Merge the  condorper-cut partials into root_file_joined.root")
     parser.add_argument("--batchDir",    dest="batchDir",    default="jobsMerge",
                         help="Where the condor scripts and logs go")
 
