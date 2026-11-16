@@ -28,6 +28,8 @@ from array import array
 import numpy as np
 import math
 
+import json ### mcortino
+
 #
 # default parser
 #
@@ -99,7 +101,8 @@ class PlotFactory:
         self._removeWeight                       =  False
         self._invertXY                           =  False
         self._postFit                            =  None
-        self._skipMissingNuisance                =  False
+        self._skipMissingNuisance                =  True ### mcortino. By default missing nuisances are skipped and replaced with nominal histograms
+        self._skippedNuisances                   =  {}
         self._removeMCStat                       =  False
         self._extraLegend                        =  None
         self._plotFancy                          =  False
@@ -678,6 +681,7 @@ class PlotFactory:
                         nuisanceHistos[ivar][nuisanceName] = histoVar
                       else :
                         # if you had self._skipMissingNuisance set to true, put the variation the same as the nominal
+                        self._registerSkippedNuisance(cutName, variableName, sampleName, nuisanceName) ### mcortino
                         histoVar = histo.Clone(shapeNameVar.replace('/', '__'))
                         nuisanceHistos[ivar][nuisanceName] = histoVar
 
@@ -2768,6 +2772,8 @@ class PlotFactory:
         text_file_html.write(" \"></div>                                 \"\n")
         text_file_html.close()
 
+        self.writeSkippedNuisances()     # mcortino. must come before os._exit, which skips finally/atexit
+
         #sys.exit(0)
 	#quit()
 	#raise SystemExit()
@@ -2949,6 +2955,21 @@ class PlotFactory:
       if type(line) == int:
         return line
 
+    ### mcortino
+    def _registerSkippedNuisance(self, cutName, variableName, sampleName, nuisanceName):
+      skipped = (self._skippedNuisances
+                .setdefault(cutName, {})
+                .setdefault(variableName, {})
+                .setdefault(sampleName, []))
+      if nuisanceName not in skipped:   # same (sample, nuisance) is hit once per alternative signal card
+          skipped.append(nuisanceName)
+
+    ### mcortino
+    def writeSkippedNuisances(self):
+        os.makedirs(self._outputDirPlots, exist_ok=True)
+        with open(self._outputDirPlots + "/skippedNuisances.json", "w") as f:
+            json.dump(self._skippedNuisances, f, indent=1)
+
 
 
 
@@ -3018,7 +3039,7 @@ if __name__ == '__main__':
     #
     parser.add_argument('--postFit', dest='postFit', help='Plot sum of post-fit backgrounds, and the data/post-fit ratio.' , default='n')
     #
-    parser.add_argument('--skipMissingNuisance', dest='skipMissingNuisance', help='Do not trigger errors if a nuisance is missing. To be used with absolute care!!!' , action='store_true', default=False)
+    parser.add_argument('--skipMissingNuisance', dest='skipMissingNuisance', help='Do not trigger errors if a nuisance is missing. To be used with absolute care!!!' , action='store_false') # mcortino: change from store_true to store_false, so it defaults to true
     #
     parser.add_argument('--removeMCStat', dest='removeMCStat', help='Do not plot the MC statistics contribution in the uncertainty band', action='store_true', default=False)
     parser.add_argument('--extraLegend'   , dest='extraLegend'   , help='User-specified additional legend'          , default=None)

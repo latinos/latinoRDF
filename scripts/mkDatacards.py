@@ -21,6 +21,8 @@ import ROOT
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from analysisFactory import TAG_UP, TAG_DOWN
 
+import json ### mcortino
+
 
 #
 # default parser
@@ -75,6 +77,7 @@ class DatacardFactory:
 
         self._fileIn = None
         self._skipMissingNuisance = False
+        self._skippedNuisances = {} ### mcortino
 
 
     # _____________________________________________________________________________
@@ -480,6 +483,7 @@ class DatacardFactory:
 
                           if self._skipMissingNuisance:
                             card.write(('-').ljust(columndef))
+                            self._registerSkippedNuisance(cutName, variableName, sampleName, nuisanceName) ### mcortino
                             continue
 
                         histoIntegral = histo.Integral()
@@ -562,6 +566,7 @@ class DatacardFactory:
                         else:
                           # saved can be false if skipMissingNuisance is true and histogram cannot be found
                           card.write(('-').ljust(columndef))
+                          self._registerSkippedNuisance(cutName, variableName, sampleName, nuisanceName) ### mcortino
                       else:
                         card.write(('-').ljust(columndef))
 
@@ -701,6 +706,10 @@ class DatacardFactory:
         else:
           self._fileIn.Close()
 
+        ### mcortino
+        with open(self._outputDirDatacard+"/"+"skippedNuisances.json", "w") as f:
+          json.dump(self._skippedNuisances, f, indent=1)
+
     # _____________________________________________________________________________
     def _saveNuisanceHistos(self, cutName, variableName, sampleName, suffixIn, suffixOut = None, symmetrize = False):
         histoUp = self._getHisto(cutName, variableName, sampleName, suffixIn + TAG_UP)     # Up
@@ -750,6 +759,15 @@ class DatacardFactory:
         histoUp.Write()
         histoDown.Write()
         return True
+
+    # _____________________________________________________________________________ ### mcortino
+    def _registerSkippedNuisance(self, cutName, variableName, sampleName, nuisanceName):
+        skipped = (self._skippedNuisances
+                  .setdefault(cutName, {})
+                  .setdefault(variableName, {})
+                  .setdefault(sampleName, []))
+        if nuisanceName not in skipped:   # same (sample, nuisance) is hit once per alternative signal card
+            skipped.append(nuisanceName)
 
     # _____________________________________________________________________________
     def _getHisto(self, cutName, variableName, sampleName, suffix = None):
