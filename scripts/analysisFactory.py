@@ -533,6 +533,7 @@ class AnalysisFactory:
             chunks = self._cap_chunks(chunks, max_events)
         return chunks
 
+    '''
     @staticmethod
     def _cap_chunks(chunks, max_events):
         """Subdivide single-file chunks so none covers more than max_events."""
@@ -550,6 +551,45 @@ class AnalysisFactory:
                 capped.append({'files': chunk['files'], 'range_start': pos,
                                'range_end': stop, 'nevents': stop - pos})
                 pos = stop
+        return 
+    '''
+
+    @staticmethod ### mcortino update
+    def _cap_chunks(chunks, max_events):
+        """Subdivide chunks larger than max_events, and pack consecutive
+        whole-file chunks together up to max_events."""
+        capped = []
+        pending, pending_n = [], 0
+
+        def flush():
+            nonlocal pending, pending_n
+            if pending:
+                capped.append({'files': pending, 'range_start': None,
+                               'range_end': None, 'nevents': pending_n})
+                pending, pending_n = [], 0
+
+        for chunk in chunks:
+            n = chunk['nevents']
+            if chunk['range_start'] is None and n <= max_events:
+                # whole file(s): can share a job with its neighbours
+                if pending and pending_n + n > max_events:
+                    flush()
+                pending = pending + chunk['files']
+                pending_n += n
+                continue
+
+            flush()                       # keep the original ordering
+            if n <= max_events:
+                capped.append(chunk)      # partial file already small enough
+                continue
+            start = chunk['range_start'] or 0
+            pos, end = start, start + n
+            while pos < end:
+                stop = min(pos + max_events, end)
+                capped.append({'files': chunk['files'], 'range_start': pos,
+                               'range_end': stop, 'nevents': stop - pos})
+                pos = stop
+        flush()
         return capped
 
     def _get_chunks(self, sample, list_root_files):

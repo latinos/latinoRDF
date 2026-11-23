@@ -546,10 +546,12 @@ if __name__ == '__main__':
     factory.setValues(
         folder_where_to_save_trees,
         variables, cuts, supercut, samples, nuisances, aliases, getattr(opt, 'lumi', 1),
-        scripts_run_folder    = getattr(opt, 'snapshotRunFolder',   None),
-        script_batch_location = getattr(opt, 'batchScriptLocation', None),
+        scripts_run_folder    = getattr(opt, 'snapshot_scripts_run_folder',   None), ### mcortino, snapshotRunFolder
+        script_batch_location = getattr(opt, 'snapshot_script_batch_location', None), ### mcortino, batchScriptLocation
         extra_transfer_files  = getattr(opt, 'extra_transfer_files', None),
     )
+    # factory._script_batch_location = os.path.abspath(factory._script_batch_location) ### mcortino: the script was not able to find submit_all!
+    # factory._scripts_run_folder    = os.path.abspath(factory._scripts_run_folder) ### mcortino
     factory.setSnapshotValues(variables_to_dump, cut_to_dump, folder_where_to_save_trees)
     factory.setConditions(opt.silentMode)
 

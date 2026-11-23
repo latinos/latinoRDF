@@ -87,6 +87,15 @@ def versionedOutputPath(directory, base="root_file_joined.root"):
         i += 1
 
 
+
+def findUpDown(histos, base, tag_pairs): ### mcortino
+    """Return (up, down) histograms for `base` using the first tag pair that has both."""
+    for up, down in tag_pairs:
+        if base + up in histos and base + down in histos:
+            return histos[base + up], histos[base + down]
+    return None
+
+
 def readFolder(rootFile, folder_name, histo_rename):
     """
     Read one cut/variable folder of one year into {histoName: TH1}.
@@ -407,6 +416,7 @@ class MergerFactory:
        #
        year_files  = {}
        year_rename = {}
+       year_tags = {} ###
        local_copies = []
 
        for folderHR, folder in foldersToMerge.items():
@@ -418,6 +428,9 @@ class MergerFactory:
          # build histo-level rename map: histo_oldName -> histo_newName
          # also handles nuisance variations: histo_oldName_<nuis><Up|Down> -> histo_newName_<nuis><Up|Down>
          year_rename[folderHR] = {f"histo_{old}": f"histo_{new}" for old, new in sample_rename.items()}
+
+         # the year's own tags first, the canonical ones always as a fallback
+         year_tags[folderHR] = list(folder.get('tags', [])) + [(TAG_UP, TAG_DOWN)] ### mcortino
 
          old_root_file_name = os.path.join(folder["folder"], "rootFile", folder["tag"], "root_file_joined.root")
          tmp_dir = tempfile.gettempdir()
@@ -537,13 +550,24 @@ class MergerFactory:
                    if not per_year[folderHR]:
                      continue
 
-                   if nameTempUp in per_year[folderHR].keys() and nameTempDown in per_year[folderHR].keys() :
-                     histos_up_to_be_summed.append  ( per_year[folderHR][nameTempUp] )
-                     histos_down_to_be_summed.append( per_year[folderHR][nameTempDown] )
+                  #  if nameTempUp in per_year[folderHR].keys() and nameTempDown in per_year[folderHR].keys() :
+                  #    histos_up_to_be_summed.append  ( per_year[folderHR][nameTempUp] )
+                  #    histos_down_to_be_summed.append( per_year[folderHR][nameTempDown] )
+                  #    histos_up_to_be_summed_weights.append ( 1.0 )
+                  #    histos_down_to_be_summed_weights.append ( 1.0 )
+                  #  else :
+
+                   found = findUpDown(per_year[folderHR],
+                                      nameTemp + '_' + nuisance['name'],
+                                      year_tags[folderHR])
+                   if found:
+                     histos_up_to_be_summed.append  ( found[0] )
+                     histos_down_to_be_summed.append( found[1] )
                      histos_up_to_be_summed_weights.append ( 1.0 )
                      histos_down_to_be_summed_weights.append ( 1.0 )
-
                    else :
+                  ###
+
 
                      if nuisanceName in all_nuisances[folderHR].keys() :
 
@@ -569,6 +593,13 @@ class MergerFactory:
                        histos_down_to_be_summed.append( per_year[folderHR][nameTemp] )
                        histos_up_to_be_summed_weights.append   ( 1.0 )
                        histos_down_to_be_summed_weights.append ( 1.0 )
+
+                 '''
+                 if nuisanceName == 'jesRegroed_Absolute':
+                   print("DBG", cutName, variableName, sampleName,
+                         "n_up =", len(histos_up_to_be_summed),
+                         {f: (nameTempUp in per_year[f]) for f in foldersToMerge if per_year[f]})
+                 '''
 
 
                  if len(histos_up_to_be_summed) >= 1 and sampleName != "DATA":
@@ -727,6 +758,7 @@ if __name__ == '__main__':
         haddPartials(outputDir or ".", cutNames)
 
     else:
+        ## print([n for n in nuisances if 'Absolute' in n])
         factory.merge(
            opt.tag,
            variables,
