@@ -531,6 +531,17 @@ class AnalysisFactory:
         max_events = sample.get('MaxEventsPerJob')
         if max_events:
             chunks = self._cap_chunks(chunks, max_events)
+
+        ### mcortino
+        era_events   = req_end - req_start
+        if 'isData' in sample or not era_events:
+            weight_scale = 1.0
+        else:
+            weight_scale = total_events / era_events
+        print(f"  -> weight scale for era {era}: {weight_scale:.6g}")
+        for chunk in chunks:
+            chunk['weight_scale'] = weight_scale
+        ###
         return chunks
 
     '''
