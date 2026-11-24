@@ -108,6 +108,7 @@ class PlotFactory:
         self._plotFancy                          =  False
         self._NoPreliminary                      =  False
         self._removeAllMC                        =  False
+        self._ratioHalfWindow                    =  0.2 ### mcortino
 
         # values
         self._inputFile      = ""
@@ -196,7 +197,8 @@ class PlotFactory:
                            plotFancy,
                            NoPreliminary,
                            RemoveAllMC,
-                           onlyPlot ### mcortino
+                           onlyPlot, ### mcortino
+                           ratioHalfWindow ### mcortino
                       ):
 
         self._silentMode                          = silentMode
@@ -228,6 +230,7 @@ class PlotFactory:
         self._plotLog                             = self._logOnly or not self._linearOnly
         self._minLogCdifference                   = self._minLogCratio
         self._maxLogCdifference                   = self._maxLogCratio
+        self._ratioHalfWindow                     = ratioHalfWindow
 
 
         if onlyPlot is not None: ### mcortino
@@ -1523,7 +1526,7 @@ class PlotFactory:
             #frameRatio.GetYaxis().SetTitle("Data/MC")
             #frameRatio.GetYaxis().SetRangeUser( 0.0, 2.0 )
             # frameRatio.GetYaxis().SetRangeUser( 0.8, 1.2 )
-            frameRatio.GetYaxis().SetRangeUser( 0.5, 1.5 )
+            frameRatio.GetYaxis().SetRangeUser( 1 - self._ratioHalfWindow, 1 + self._ratioHalfWindow )
             self.Pad2TAxis(frameRatio)
             #                               if there is "histo_total" there is no need of explicit nuisances
             # if (not self._removeMCStat)  or len(mynuisances.keys()) != 0 or histo_total!= None:
@@ -2470,7 +2473,7 @@ class PlotFactory:
                     else :
                       weight_X_frameRatio.GetXaxis().SetTitle(variableName)
                     weight_X_frameRatio.GetYaxis().SetTitle("Data/Expected")
-                    weight_X_frameRatio.GetYaxis().SetRangeUser( 0.5, 1.5 )
+                    weight_X_frameRatio.GetYaxis().SetRangeUser( 1 - self._ratioHalfWindow, 1 + self._ratioHalfWindow ) ###
                     self.Pad2TAxis(weight_X_frameRatio)
 
                     #                               if there is "histo_total" there is no need of explicit nuisances
@@ -3051,6 +3054,7 @@ if __name__ == '__main__':
     parser.add_argument('--RemoveAllMC', dest='RemoveAllMC', help='Remove all MC in legend' , action='store_true', default=False)
     #
     # parser.add_argument('--parallelPlotting', dest='parallelPlotting', help='Plot each cut in parallel' , action='store_true', default=False)
+    parser.add_argument('--ratioHalfWindow', dest='ratioHalfWindow', help='Specify half the height of the ratio plot y-dimension (simmetrical around 1)', default=0.2, type=float) ###mcortino
 
 
 
@@ -3210,7 +3214,8 @@ if __name__ == '__main__':
                            opt.plotFancy,
                            opt.NoPreliminary,
                            opt.RemoveAllMC,
-                           opt.onlyPlot ### mcortino
+                           opt.onlyPlot, ### mcortino
+                           opt.ratioHalfWindow ### mcortino
                            )
       
 
