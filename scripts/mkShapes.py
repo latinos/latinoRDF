@@ -613,10 +613,21 @@ int main() {{
                                  + "/" + self.job_prefix() + "_" + sampleName + "_" + subname + "_" + str(i))
                     out_file  = self.output_file_name(sampleName, subname, i)
 
+                    ### mcortino
+                    scale        = chunk.get('weight_scale', 1.0)
+                    chunk_weight = weight if scale == 1.0 else f"({weight}) * {scale!r}"
+                    self.create_cpp_source_list_of_files(
+                        name_code, self._treeName, chunk['files'], out_file, sampleName, chunk_weight,
+                        {}, {}, subsamples_dict, aliases_ordered,
+                        range_start=chunk['range_start'], range_end=chunk['range_end'])
+                    ###
+                    '''
                     self.create_cpp_source_list_of_files(
                         name_code, self._treeName, chunk['files'], out_file, sampleName, weight,
                         {}, {}, subsamples_dict, aliases_ordered,
                         range_start=chunk['range_start'], range_end=chunk['range_end'])
+                    '''
+
 
                     list_of_files_to_compile.append(name_code)
                     list_of_files_divided[sampleName].append(name_code)
